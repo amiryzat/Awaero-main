@@ -1,0 +1,13 @@
+frame,actual,predicted,correct,seconds,raw_answer
+profile_A_01.jpg,A,A,True,13.58,A
+profile_A_02.jpg,A,A,True,11.24,A
+profile_A_03.jpg,A,A,True,11.61,A
+profile_B_01.jpg,B,B,True,12.72,B
+profile_B_02.jpg,B,B,True,12.93,B
+profile_B_03.jpg,B,B,True,12.80,B
+profile_C_01.jpg,C,C,True,14.42,C
+profile_C_02.jpg,C,C,True,15.65,C
+profile_C_03.jpg,C,C,True,18.33,C
+profile_T_01.jpg,T,T,True,19.06,T
+profile_T_02.jpg,T,T,True,20.60,T
+profile_T_03.jpg,T,T,True,21.89,T

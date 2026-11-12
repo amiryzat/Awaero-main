@@ -1,0 +1,14 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Node / Expo app (separate repo: github.com/amiryzat/Awaero)
+app-monitor/
+
+# macOS / editor
+.DS_Store
+.obsidian/
+
+# Large local media (demo recordings)
+*.mov
