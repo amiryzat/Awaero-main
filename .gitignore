@@ -12,3 +12,8 @@ app-monitor/
 
 # Large local media (demo recordings)
 *.mov
+
+# Large local evidence + runtime artifacts (kept off GitHub; back these up separately)
+archive/
+snapshots/
+live_frame.jpg

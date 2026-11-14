@@ -1,29 +1,42 @@
 """
 Live integrated system - the documented five-layer pipeline, end to end.
 
-This is the single-entry dual-mode runtime described in Chapter 3. It does NOT
-reimplement detection; it reuses the two engines already built and wires them
-through the Pre-Processing / Mode Selection Layer (Layer 2):
+Single-entry dual-mode runtime (Chapter 3). Reuses the engines already built and
+wires them through the Mode Selection Layer (Layer 2) and the Decision Logic
+Layer (Layer 4).
 
-    MediaPipe Hands is the router. Every frame:
-      - a hand is detected  -> ACTIVE mode  (gesture control, from live_active)
-      - no hand (grace)     -> PASSIVE mode (pose activity, from live_passive)
+POSE RUNS ON EVERY FRAME, IN BOTH MODES. The room is always being sensed; the
+mode only decides who OWNS the appliances. (The 2026-11-14 test failed because
+pose only ran in passive mode and the router never left active - see below.)
 
-Only one mode owns the LEDs per frame (the two modes mean different things by
-the same 3 LEDs, so running both at once would fight). Passive runs pose only
-when idle (no hand), which is also the only time ambient classification is
-wanted, so the heavy model runs exactly when the light one says to.
+    Layer 2 router - a DELIBERATE control hand, not mere hand presence:
+      - hand held up, fingers up, away from the face -> ACTIVE (gesture control)
+      - anything else (typing, resting, no hand)     -> PASSIVE (activity sensing)
 
-Note vs the thesis: the documented passive engine is Moondream2 (VLM). This
-runtime uses the pose engine instead - the implemented improvement (real-time,
-multi-person, no hallucination). See docs/VLM_vs_Pose.md. The VLM path still
-lives in classify_passive.py as the designed baseline.
+    Layer 4 passive fusion (see fuse_label):
+      - PRESENCE: pose sees a person AND (Moondream) the VLM described a person
+        within PRESENCE_CONFIRM_SECONDS. Nobody -> Profile C after EMPTY_SECONDS.
+      - POSTURE: the VLM decides T / A / B. With no answer yet the profile is
+        HELD, never guessed from pose (pose posture is unreliable in this room).
+
+Each profile maps to a per-appliance on/off vector (light, fan, tv). Both modes
+write the SAME appliance state, so entering gesture control no longer wipes what
+passive had set.
+
+The VLM runs in a BACKGROUND thread on a downscaled frame; pose carries the
+real-time path. Default engine: Moondream (moondream_vlm.py). Qwen3-VL
+(classify_passive.py) is the evaluated alternative.
 
 Keys:  q quit   0/1/... switch camera (Amvx excluded)
-Usage: python live_system.py        (selftest: python live_system.py selftest)
+Usage: python live_system.py          Moondream (default)
+       python live_system.py qwen     Qwen3-VL instead
+       python live_system.py selftest
 """
 
+import csv
+import os
 import sys
+import threading
 import time
 from collections import deque, Counter
 
@@ -31,58 +44,312 @@ import cv2
 import mediapipe as mp
 
 from serial_actuator import Actuator
+from display_node import LcdDisplay, status_lines
 import camera
+import classify_passive
+import moondream_vlm
+from live_active import (classify_gesture, hand_is_upright, apply, GESTURE_LABEL,
+                         CONFIRM_FRAMES, HOLD_SECONDS, REARM_SECONDS)
+# live_passive is imported inside main(): it builds the pose model at import time.
 
-# Reuse both engines, no rewrite. Importing these runs their camera scan + loads
-# the pose model (module-level in live_passive). ponytail: double camera scan at
-# import (one per module); harmless, factor find_index into a cached call if slow.
-from live_passive import (
-    analyse, enhance_if_dark, LED, ACTUATION, PROFILE_NAMES,
-    SMOOTH_SECONDS, SWITCH_RATIO, MIN_VOTES, CAMERA_INDEX,
-)
-from live_active import (
-    classify_gesture, apply, led_state, GESTURE_LABEL,
-    CONFIRM_FRAMES, HOLD_SECONDS, REARM_SECONDS,
-)
+PASSIVE_FALLBACK_SECONDS = 2.0   # no control hand for this long -> back to passive
+# Sustained absence before the room is called empty. 4s was too short: pose
+# briefly loses a person who leans forward over a desk, and the room went to
+# "unoccupied" with someone sitting right there.
+EMPTY_SECONDS = 8.0
 
-PASSIVE_FALLBACK_SECONDS = 2.0   # no hand for this long -> drop back to passive
+# Presence confirmation by the VLM. Pose cannot tell a phantom pose on a chair or
+# clothes rack from a real person: measured 2026-11-14, both score landmark
+# visibility/presence ~1.00, so with the room empty pose kept "seeing" someone and
+# it never went to C. So the room only counts as occupied if the VLM described a
+# person (T/A/B) within this many seconds: 10 s is ~4 Moondream answers, and its
+# people prompt missed 0 of 29 person frames. Leaving -> C measured 10-18 s.
+# use_qwen() sets None (pose alone): Qwen answers every ~15 s, which would leave
+# the lights off that long as someone walks in.
+PRESENCE_CONFIRM_SECONDS = 10.0
+
+# Leave ACTIVE after this long with no gesture being held. Without it a hand on
+# the table kept the system in ACTIVE indefinitely once it had been entered.
+ACTIVE_IDLE_SECONDS = 6.0
+# With no person box matched, fall back to an absolute height test. 0.4 was too
+# strict: seated in a wide room shot, a hand raised fully above the head still
+# landed at ~0.55 of frame height and the gesture was ignored.
+HAND_RAISE_FRACTION = 0.55
+# Process at this width instead of the camera's native 1080p. Running the full
+# pose model (4 poses) plus Hands on every 1920x1080 frame saturated the Metal
+# GPU that Ollama needs: the SAME model/prompt/frames measured 10 s standalone
+# but 44 s inside the live loop. Vision and the VLM were starving each other.
+PROC_WIDTH = 960
+POSE_EVERY = 2                   # run pose every Nth frame; a room does not
+                                 # change meaningfully at 30 fps
+VLM_WIDTH = 640                  # downscale before inference (latency lever)
+VLM_STALE_SECONDS = 45.0         # ignore a VLM answer older than this
+# Minimum gap between VLM calls. Moondream takes ~1-2 s, so 1 s gives an answer
+# every ~2 s (fast re-entry confirmation; live latency stayed flat at 1.87 s over
+# 199 answers). use_qwen() sets 3 s: re-inferring back-to-back pegged the GPU and
+# Qwen's latency climbed 8.8 s -> 70.5 s over one run.
+VLM_MIN_INTERVAL = 1.0
+
+# Passive VLM engine, called by the worker thread. Moondream is the default,
+# chosen 2026-11-14 from docs/EVAL_passive_vlm.md Runs 9-13; use_qwen() swaps in
+# Qwen3-VL. The worker looks these names up at call time.
+ask = moondream_vlm.ask
+parse_label = moondream_vlm.keyword_label
+parse_phone = moondream_vlm.parse_phone
+VLM_PROMPT = moondream_vlm.DESCRIBE
+VLM_NAME = moondream_vlm.MODEL
+
+
+def use_qwen():
+    """Switch the passive VLM to Qwen3-VL, the evaluated alternative."""
+    global ask, parse_label, parse_phone, VLM_PROMPT, VLM_NAME
+    global VLM_MIN_INTERVAL, PRESENCE_CONFIRM_SECONDS
+    ask, parse_label = classify_passive.ask, classify_passive.parse_label
+    parse_phone = classify_passive.parse_phone
+    VLM_PROMPT, VLM_NAME = classify_passive.CLASSIFY_PROMPT_PHONE, classify_passive.MODEL
+    VLM_MIN_INTERVAL = 3.0
+    PRESENCE_CONFIRM_SECONDS = None
+
+# How long a gesture holds an appliance against the automatic scenario. Without
+# an expiry a fist left the fan off forever, because no gesture turns the fan
+# back on (there are only 3 gestures). With no hold at all, passive would
+# overwrite every gesture immediately and gesture control would be pointless.
+# The hold is PER APPLIANCE and also ends early when the room context changes.
+OVERRIDE_SECONDS = 60.0
+GESTURE_HOLDS = {"peace": [0], "open_palm": [2], "fist": [0, 1, 2]}  # light,fan,tv
+
+# Decision Logic Layer (Layer 4): each profile -> a per-appliance on/off vector.
+# The 3 pins are RELABELLED from the green/yellow/red traffic light to appliances:
+# pin9=light, pin10=fan, pin11=tv. Same "a,b,c\n" firmware - no reflash.
+# ponytail: B's light is OFF, not dimmed (0/1 protocol can't PWM).
+FUSED_APP  = {"T": (1, 0, 0), "A": (1, 1, 1), "B": (0, 1, 0), "C": (0, 0, 0)}
+FUSED_NAME = {"T": "transitional (standing/walking)", "A": "active (sitting)",
+              "B": "resting (lying)", "C": "unoccupied"}
+FUSED_ACT  = {"T": "light ON, fan+TV OFF", "A": "light + fan + TV ON",
+              "B": "light OFF, fan ON, TV OFF", "C": "all OFF"}
+
+LOG_PATH = "live_log.csv"
+LOG_FIELDS = ["time", "mode", "people", "pose", "vlm", "phone", "vlm_latency_s",
+              "profile", "light", "fan", "tv",
+              # RO3 response latency, appended so older parsers keep working.
+              # decide = camera frame to committed decision (the real pipeline
+              # cost, measured 21-42 ms). actuate = the serial write call only;
+              # on macOS that returns in ~0.1 ms once the bytes are buffered, so
+              # it is NOT time-until-the-LED-changes. Reporting it as end-to-end
+              # actuation would overstate the measurement; an Arduino ack would
+              # be needed for that.
+              "decide_latency_ms", "actuate_latency_ms"]
+FRAME_PATH = "live_frame.jpg"   # latest annotated frame, relayed to the phone app
+# Written here first, then renamed, so the server never serves a half-written
+# file. It must keep the .jpg extension: OpenCV picks its encoder from that, and
+# a plain ".tmp" makes imwrite fail.
+FRAME_TMP = "live_frame.tmp.jpg"
+FRAME_EVERY = 0.5               # seconds between writes; also the app's heartbeat
+SNAP_DIR = "snapshots"   # one annotated frame per decision: debugging evidence,
+                         # and a labelled figure per response path for Chapter 4
 
 mp_hands = mp.solutions.hands
 mp_draw = mp.solutions.drawing_utils
 mp_styles = mp.solutions.drawing_styles
 
 
-def decide_mode(current, hand_present, now, last_hand_time):
-    """Layer 2 router. Hand -> ACTIVE at once; no hand past the grace -> PASSIVE;
-    inside the grace the mode is held (stops flicker when detection blinks)."""
-    if hand_present:
+def log_row(**row):
+    """Append one event to live_log.csv for RO3 (the dashboard reads this).
+
+    mode=PASSIVE/ACTIVE rows are control decisions; mode=VLM rows are one per
+    inference, so latency stats aren't double-counted across profile changes.
+
+    A log written before the latency columns existed has a shorter header, and
+    appending wider rows to it would silently misalign every column for whoever
+    reads it. So a log whose header no longer matches is rotated aside, never
+    appended to and never overwritten (it is evidence).
+    """
+    new = not os.path.exists(LOG_PATH)
+    if not new and rotate_stale_log():
+        new = True
+    with open(LOG_PATH, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=LOG_FIELDS, extrasaction="ignore")
+        if new:
+            w.writeheader()
+        w.writerow({k: row.get(k, "") for k in LOG_FIELDS})
+
+
+def rotate_stale_log(path=None):
+    """Rename the log aside when its header is not the current LOG_FIELDS.
+    Returns True when it rotated."""
+    path = path or LOG_PATH
+    try:
+        with open(path, newline="") as f:
+            header = next(csv.reader(f), [])
+    except OSError:
+        return False
+    if header == LOG_FIELDS:
+        return False
+    stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(os.path.getmtime(path)))
+    kept = f"{os.path.splitext(path)[0]}_{stamp}.csv"
+    os.replace(path, kept)
+    print(f"[log] header changed; previous log kept as {os.path.basename(kept)}")
+    return True
+
+
+def control_hand_debug(lm, people, w, h):
+    """(is_control, reason). The reason goes on screen: two rounds of guessing
+    why gestures never fired produced two wrong fixes, so the system now says
+    exactly which gate rejected the hand."""
+    if not hand_is_upright(lm):
+        return False, "not upright"
+    cx = (lm[0].x + lm[9].x) / 2 * w
+    cy = (lm[0].y + lm[9].y) / 2 * h          # for the no-person fallback
+    knuckles = lm[9].y * h
+    # Compared against the FACE (p[3], highest eye/ear landmark), not the box top.
+    # The box is built from every pose landmark including wrist and fingers, so a
+    # well-tracked raised hand stretched the box upward with it and was never
+    # "above" it: only the far hand, which pose tracks poorly, ever got through
+    # (observed 2026-11-14). Every person horizontally under the hand counts and
+    # the hand must clear the highest face, so a phantom on a chair cannot help.
+    heads = [p[3] for p in people if p[0][0] <= cx <= p[0][2]]
+    if heads:
+        ok = knuckles < min(heads)
+        return ok, ("OK" if ok else "below head")
+    hi = cy < HAND_RAISE_FRACTION * h
+    return hi, ("OK" if hi else "too low in frame")
+
+
+def timed_set(act, appl):
+    """Drive the appliances and return how long the serial write took, in ms.
+    This is RO3's actuation latency; without it only the VLM call is timed."""
+    t0 = time.time()
+    act.set(*appl)
+    return round((time.time() - t0) * 1000, 1)
+
+
+def since_ms(t0):
+    """Milliseconds since t0, for the decide latency."""
+    return round((time.time() - t0) * 1000, 1)
+
+
+def is_control_hand(lm, people, w, h):
+    """True only for a hand DELIBERATELY RAISED ABOVE THE HEAD.
+
+    Two earlier versions were too permissive:
+      1. any visible hand -> a hand on the keyboard pinned the system in ACTIVE
+         mode, so passive sensing never ran at all;
+      2. any upright hand not inside the top of a person's box -> a hand resting
+         near the chin still fired OPEN PALM and switched the TV, because pose
+         had only boxed the head so the "face region" test missed.
+
+    So the command must now be unambiguous: fingers up AND the hand above the top
+    of that person's own box, i.e. genuinely raised above their head. You cannot
+    do that by accident while typing or resting your chin on your hand.
+    """
+    return control_hand_debug(lm, people, w, h)[0]   # one implementation, one truth
+
+
+def decide_mode(current, control_hand, now, last_hand_time):
+    """Layer 2 router. A deliberate hand -> ACTIVE at once; none past the grace ->
+    PASSIVE; inside the grace the mode is held (stops flicker mid-gesture)."""
+    if control_hand:
         return "ACTIVE"
     if now - last_hand_time > PASSIVE_FALLBACK_SECONDS:
         return "PASSIVE"
     return current
 
 
+def fuse_label(pose_label, vlm_label, current="C"):
+    """Layer 4 fusion. Pose = PRESENCE. VLM = POSTURE. Nothing guesses.
+
+    Measured on 2026-11-14, pose posture is not usable in this room. Three
+    separate attempts failed: the torso angle called a man leaning over his
+    laptop "lying"; a foreshortening cue called the same pose "lying" again; and
+    a body-extent ratio overlaps between sitting and standing (a man standing
+    bent over the desk measured 4.4, inside the seated range). Across one run
+    pose flipped T/B/A every few seconds while the subject sat still, and the
+    VLM answered "A" correctly nearly every time.
+
+    So pose now only answers "is anyone there" - which it does reliably, which
+    is what blocks the VLM hallucinating an empty room, and which is where the
+    energy saving actually comes from. Posture is the VLM's job alone.
+
+    When no VLM answer has arrived yet the profile is HELD, never guessed. That
+    is what removes the double switch: previously pose guessed a posture, the
+    LEDs moved, then the VLM corrected it ~20 s later and they moved again. The
+    cost is that a posture change waits for the VLM; the benefit is that the
+    appliances stop blinking between states.
+    """
+    if pose_label == "C":              # presence gate: pose wins outright
+        return "C"
+    if vlm_label in ("T", "A", "B"):   # someone present -> the VLM judges what
+        return vlm_label
+    # No VLM answer yet. HOLD the current profile rather than guessing from pose:
+    # pose's own guess was what made the LEDs switch twice for one event.
+    return current if current in ("T", "A", "B") else "T"
+
+
 def main():
+    from live_passive import (
+        analyse, enhance_if_dark, SMOOTH_SECONDS, SWITCH_RATIO, MIN_VOTES,
+    )
+
+    os.makedirs(SNAP_DIR, exist_ok=True)
+
     act = Actuator()
-    act.set(*LED["C"])                       # start all off -> RED
+    lcd = LcdDisplay(exclude=act.port)       # second Arduino: 16x2 status screen
+    appl = list(FUSED_APP["C"])              # [light, fan, tv] - ONE shared state
+    act.set(*appl)
 
-    cap = cv2.VideoCapture(CAMERA_INDEX)
+    cam_index = camera.find_index()
+    cap = cv2.VideoCapture(cam_index)
     if not cap.isOpened():
-        raise SystemExit(f"Could not open camera index {CAMERA_INDEX}.")
+        raise SystemExit(f"Could not open camera index {cam_index}.")
 
-    print(f"Live integrated system on camera {CAMERA_INDEX}.")
-    print("Show a hand = ACTIVE (gestures). No hand = PASSIVE (activity). 'q' quits.\n")
+    print(f"Live integrated system on camera {cam_index}. Passive VLM: {VLM_NAME}")
+    print("Hold a hand UP (fingers up) = ACTIVE gestures. Otherwise PASSIVE. 'q' quits.\n")
+
+    # --- VLM background worker: classify the latest frame, store the result ---
+    vlm = {"label": None, "phone": "", "latency": "", "ts": 0.0, "pose_ctx": None,
+           "person_ts": 0.0}                 # last time the VLM described a person
+    shared = {"frame": None, "want": False, "stop": False, "pose_ctx": None}
+    vlm_lock = threading.Lock()
+
+    def vlm_worker():
+        next_ok = 0.0
+        while not shared["stop"]:
+            if shared["want"] and shared["frame"] is not None and time.time() >= next_ok:
+                f = shared["frame"]
+                ctx = shared["pose_ctx"]     # the pose reading this frame showed
+                fh, fw = f.shape[:2]
+                if fw > VLM_WIDTH:           # downscale: the main latency lever
+                    f = cv2.resize(f, (VLM_WIDTH, int(fh * VLM_WIDTH / fw)))
+                okj, buf = cv2.imencode(".jpg", f)
+                if okj:
+                    try:
+                        ans, elapsed = ask(buf.tobytes(), VLM_PROMPT)
+                        lab, ph = parse_label(ans), parse_phone(ans)
+                        if lab in ("T", "A", "B", "C"):
+                            with vlm_lock:
+                                vlm["label"], vlm["phone"] = lab, ph
+                                vlm["pose_ctx"] = ctx
+                                if lab in ("T", "A", "B"):
+                                    vlm["person_ts"] = time.time()
+                                vlm["latency"], vlm["ts"] = round(elapsed, 1), time.time()
+                            log_row(time=time.strftime("%H:%M:%S"), mode="VLM",
+                                    vlm=lab, phone=ph, vlm_latency_s=round(elapsed, 1))
+                    except Exception as e:                      # keep the loop alive
+                        print("VLM worker error:", e)
+                    next_ok = time.time() + VLM_MIN_INTERVAL
+            time.sleep(0.3)
+
+    threading.Thread(target=vlm_worker, daemon=True).start()
 
     mode = "PASSIVE"
     last_hand_time = 0.0
+    last_person_time = 0.0
     pose_ts = 0                              # strictly-increasing ms for pose VIDEO mode
 
-    # passive smoothing state (from live_passive)
-    window = deque()
+    window = deque()                         # passive smoothing (holds fused labels)
     committed = "C"
 
-    # active gesture state (from live_active)
-    tv_on = lights_on = False
+    tv_on = lights_on = False                # active gesture state
     recent = deque(maxlen=CONFIRM_FRAMES)
     armed = True
     candidate = "none"
@@ -90,38 +357,123 @@ def main():
     none_start = None
     stable = "none"
     progress = 0.0
+    v = None                                 # latest VLM label, for the overlay
+    vlm_phone = ""
+    vlm_lat = ""
+    vctx = None                              # pose reading the VLM was judging
+    snap = None                              # set on a decision -> saved after overlay
+    last_relay = 0.0                         # last write of live_frame.jpg
+    hold_until = [0.0, 0.0, 0.0]             # per-appliance gesture override expiry
+    frame_i = 0
+    pose_label, people = None, []            # cached between pose runs
+    gesture_seen_time = 0.0                  # last time a gesture was being held
 
-    with mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7,
-                        min_tracking_confidence=0.6) as hands:
+    # max_num_hands=2: with two people in the room a single tracked hand locked
+    # onto the wrong person (the friend holding a phone) and the raised command
+    # hand was never seen at all.
+    # 0.5, not 0.7: across a whole room your hand is only a few dozen pixels and
+    # 0.7 never fired once in a 19-minute run.
+    with mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.5,
+                        min_tracking_confidence=0.5) as hands:
         while True:
             ok, frame = cap.read()
             if not ok:
                 continue
-            frame = enhance_if_dark(frame)   # rescue dark rooms (helps pose; harmless to hands)
+            t_frame = time.time()            # RO3 clock starts at the camera frame
+            act_ms = None                    # set when this frame writes to serial
+            frame = enhance_if_dark(frame)   # rescue dark rooms
             now = time.time()
+            h, w = frame.shape[:2]
 
+            # DETECTION runs on a downscaled copy to leave GPU for Ollama; the
+            # DISPLAY keeps full resolution. Shrinking the displayed frame made
+            # the overlay text huge and the picture blurry on a Retina screen.
+            proc, scale = frame, 1.0
+            if w > PROC_WIDTH:
+                proc = cv2.resize(frame, (PROC_WIDTH, int(h * PROC_WIDTH / w)))
+                scale = w / float(PROC_WIDTH)
+
+            # --- pose in BOTH modes (the room is always sensed), every Nth frame ---
+            frame_i += 1
+            if frame_i % POSE_EVERY == 0 or pose_label is None:
+                pose_ts += 40
+                pose_label, found = analyse(proc, pose_ts)    # boxes in proc coords
+                people = [(tuple(int(v * scale) for v in box), post, ratio)
+                          + (head_y * scale,)
+                          for box, post, ratio, head_y in found]   # -> display coords
+            confirmed = True                 # see PRESENCE_CONFIRM_SECONDS
+            if PRESENCE_CONFIRM_SECONDS is not None:
+                with vlm_lock:
+                    confirmed = now - vlm["person_ts"] <= PRESENCE_CONFIRM_SECONDS
+            present = bool(people) and confirmed
+            real_people = people if present else []   # unconfirmed boxes: phantoms
+            if present:
+                last_person_time = now
+
+            # Hands runs on the FULL-RES frame. At 960px a hand raised across the
+            # room is only ~30px and was never detected: zero gestures fired in an
+            # 8.5-minute run. Hands is much lighter than the pose model, so this
+            # costs little, and pose keeps the downscaled input.
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             hres = hands.process(rgb)
-            hand_present = bool(hres.multi_hand_landmarks)
-            if hand_present:
+            # A RAISED hand ENTERS active mode; once there, ANY visible hand can
+            # gesture. Requiring the hand to stay above the head to classify too
+            # meant that lowering it to make a peace sign dropped the hand and no
+            # gesture ever registered.
+            hand_lms = None          # any detected hand -> used for GESTURING
+            ctl = False              # strict raised hand -> used to ENTER ACTIVE
+            hand_dbg = "no hand seen"
+            for cand_hand in (hres.multi_hand_landmarks or []):
+                if hand_lms is None:
+                    hand_lms = cand_hand
+                ok_hand, why = control_hand_debug(cand_hand.landmark, real_people, w, h)
+                hand_dbg = why
+                if ok_hand:
+                    hand_lms, ctl = cand_hand, True
+                    break
+            # Keep ACTIVE alive only while a GESTURE-SHAPED hand (fingers up) is
+            # visible. "Any visible hand" kept it alive forever on a hand resting
+            # on the table or keyboard.
+            if ctl or (mode == "ACTIVE" and hand_lms is not None
+                       and hand_is_upright(hand_lms.landmark)):
                 last_hand_time = now
 
             prev_mode = mode
-            mode = decide_mode(mode, hand_present, now, last_hand_time)
+            mode = decide_mode(mode, ctl, now, last_hand_time)
+            if (mode == "ACTIVE" and prev_mode == "ACTIVE"
+                    and now - gesture_seen_time > ACTIVE_IDLE_SECONDS):
+                mode, last_hand_time = "PASSIVE", 0.0      # idle: hand back to auto
 
             if mode == "ACTIVE":
+                shared["want"] = False       # no VLM while a hand is driving
+                with vlm_lock:               # ...but someone gesturing is present:
+                    vlm["person_ts"] = now   # without this, presence confirmation
+                                             # expired during gestures and the room
+                                             # blinked to C on returning to passive
+                if prev_mode != "ACTIVE":    # seed from what is actually lit, so
+                    lights_on = bool(appl[0])  # entering gesture control no longer
+                    tv_on = bool(appl[2])      # blanks the appliances
+                    recent.clear()
+                    gesture_seen_time = now
+                    # every entry is logged + snapshotted with the gate that let it
+                    # in, so a false activation can be diagnosed from evidence
+                    log_row(time=time.strftime("%H:%M:%S"), mode="ACTIVE_ENTER",
+                            people=len(real_people), profile=hand_dbg)
+                    snap = "enter"
+
                 raw = "none"
-                if hand_present:
-                    hand = hres.multi_hand_landmarks[0]
+                if hand_lms:
                     mp_draw.draw_landmarks(
-                        frame, hand, mp_hands.HAND_CONNECTIONS,
+                        frame, hand_lms, mp_hands.HAND_CONNECTIONS,
                         mp_styles.get_default_hand_landmarks_style(),
                         mp_styles.get_default_hand_connections_style())
-                    raw = classify_gesture(hand.landmark)
+                    raw = classify_gesture(hand_lms.landmark)
 
                 recent.append(raw)
                 stable = recent[0] if (len(recent) == CONFIRM_FRAMES
                                        and len(set(recent)) == 1) else "none"
+                if stable != "none":
+                    gesture_seen_time = now
                 progress = 0.0
                 if stable == "none":
                     candidate = "none"
@@ -138,50 +490,141 @@ def main():
                         progress = min(held / HOLD_SECONDS, 1.0)
                         if armed and held >= HOLD_SECONDS:
                             tv_on, lights_on = apply(stable, tv_on, lights_on)
-                            act.set(*led_state(tv_on, lights_on))
+                            if stable == "fist":
+                                appl[1] = 0          # all-off override kills the fan too
+                            appl[0], appl[2] = int(lights_on), int(tv_on)
+                            for i in GESTURE_HOLDS.get(stable, []):
+                                hold_until[i] = now + OVERRIDE_SECONDS
+                            decide_ms = since_ms(t_frame)
+                            act_ms = timed_set(act, appl)
+                            log_row(time=time.strftime("%H:%M:%S"), mode="ACTIVE",
+                                    people=len(people), profile=stable,
+                                    light=appl[0], fan=appl[1], tv=appl[2],
+                                    decide_latency_ms=decide_ms,
+                                    actuate_latency_ms=act_ms)
+                            snap = stable
                             armed, candidate = False, "none"
 
-                if prev_mode != "ACTIVE":     # just entered -> show appliance state
-                    act.set(*led_state(tv_on, lights_on))
-
             else:  # PASSIVE
-                if prev_mode == "ACTIVE":     # just entered -> show the room tier
+                if prev_mode == "ACTIVE":
                     window.clear()
-                    act.set(*LED[committed])
-                pose_ts += 40
-                label, people = analyse(frame, pose_ts)
-                window.append((now, label))
+
+                # feed the VLM a clean frame when a person is present (upright -> it
+                # splits T/A; lying -> it only supplies the phone flag, which the
+                # fusion ignores but we log as scene metadata).
+                # run the VLM whenever ANYONE is present. This used to be
+                # ("A","B"), so once pose learned to report T the VLM stopped
+                # running entirely while the room was transitional.
+                shared["want"] = pose_label != "C"
+                if shared["want"]:
+                    shared["frame"] = proc.copy()       # clean (before overlays)
+                    shared["pose_ctx"] = pose_label     # what pose saw in it
+                    with vlm_lock:
+                        v, vlm_phone = vlm["label"], vlm["phone"]
+                        vlm_lat, vts, vctx = vlm["latency"], vlm["ts"], vlm["pose_ctx"]
+                    if now - vts > VLM_STALE_SECONDS:   # too old to trust
+                        v = None
+                else:
+                    v, vlm_phone, vlm_lat, vctx = None, "", "", None
+
+                fused = fuse_label(pose_label if present else "C", v, committed)
+                window.append((now, fused))
                 while window and now - window[0][0] > SMOOTH_SECONDS:
                     window.popleft()
                 cand, votes = Counter(l for _, l in window).most_common(1)[0]
-                if (cand != committed and votes >= MIN_VOTES
-                        and votes >= SWITCH_RATIO * len(window)):
-                    committed = cand
-                    print(f"[{time.strftime('%H:%M:%S')}] passive -> {committed}: {ACTUATION[committed]}")
-                    act.set(*LED[committed])
-                for (x1, y1, x2, y2), post in people:
-                    c = (0, 255, 0) if post == "upright" else (0, 200, 255)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), c, 2)
-                    cv2.putText(frame, post, (x1, max(y1 - 10, 20)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, c, 2)
 
-            # --- overlay: mode is front and center so the router is visible ---
+                # presence hysteresis: a momentary pose dropout must NOT black the
+                # room. Only call it empty after a sustained absence.
+                if cand == "C" and now - last_person_time < EMPTY_SECONDS:
+                    cand = committed
+
+                switched = (cand != committed and votes >= MIN_VOTES
+                            and votes >= SWITCH_RATIO * len(window))
+                if switched:
+                    committed = cand
+                    hold_until = [0.0, 0.0, 0.0]   # context changed -> auto resumes
+
+                # Drive every appliance that is NOT currently held by a gesture.
+                # Held ones keep the user's choice until their hold expires, so a
+                # gesture is respected without disabling the automation forever.
+                target = FUSED_APP[committed]
+                if any(now >= hold_until[i] and appl[i] != target[i] for i in range(3)):
+                    for i in range(3):
+                        if now >= hold_until[i]:
+                            appl[i] = target[i]
+                    act_ms = timed_set(act, appl)
+
+                if switched:
+                    print(f"[{time.strftime('%H:%M:%S')}] passive -> {committed}: "
+                          f"{FUSED_ACT[committed]}")
+                    log_row(time=time.strftime("%H:%M:%S"), mode="PASSIVE",
+                            people=len(people), pose=pose_label, vlm=v or "",
+                            phone=vlm_phone, vlm_latency_s=vlm_lat, profile=committed,
+                            light=appl[0], fan=appl[1], tv=appl[2],
+                            decide_latency_ms=since_ms(t_frame),
+                            actuate_latency_ms="" if act_ms is None else act_ms)
+                    snap = committed
+
+            # --- people boxes drawn in BOTH modes, so detection is always visible ---
+            for (x1, y1, x2, y2), post, ratio, _ in people:  # display coords
+                c = (0, 200, 255) if post == "lying" else (0, 255, 0)
+                if not present:
+                    c, post = (128, 128, 128), "unconfirmed"   # VLM sees nobody
+                cv2.rectangle(frame, (x1, y1), (x2, y2), c, 2)
+                # the ratio is shown so STAND_RATIO can be calibrated by eye
+                cv2.putText(frame, f"{post} {ratio:.1f}", (x1, max(y1 - 10, 20)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, c, 2)
+
+            lcd.show(*status_lines(mode, committed, stable, appl))   # model-house screen
+
+            # --- overlay ---
             mcolor = (0, 200, 255) if mode == "ACTIVE" else (0, 255, 0)
-            cv2.putText(frame, f"MODE: {mode}", (15, 40),
+            cv2.putText(frame, f"MODE: {mode}   ({len(people)} ppl)", (15, 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, mcolor, 3)
             if mode == "ACTIVE":
                 cv2.putText(frame, GESTURE_LABEL[stable], (15, 80),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                cv2.putText(frame, f"TV: {'ON' if tv_on else 'OFF'}   Lights: {'ON' if lights_on else 'OFF'}",
-                            (15, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
-                if progress > 0 and armed:
-                    cv2.rectangle(frame, (15, 130), (315, 150), (80, 80, 80), 1)
-                    cv2.rectangle(frame, (15, 130), (15 + int(300 * progress), 150), (0, 255, 0), -1)
             else:
-                cv2.putText(frame, f"{committed}: {PROFILE_NAMES[committed]}", (15, 80),
+                tag = f"{committed}: {FUSED_NAME[committed]}"
+                held = max(hold_until) - now         # why the LEDs != the profile
+                if held > 0:
+                    tag += f"  [MANUAL {held:.0f}s]"
+                cv2.putText(frame, tag, (15, 80),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                cv2.putText(frame, ACTUATION[committed], (15, 115),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            # the appliance truth = exactly what the three LEDs are doing
+            on = lambda b: "ON " if b else "OFF"
+            cv2.putText(frame, f"LIGHT:{on(appl[0])}  FAN:{on(appl[1])}  TV:{on(appl[2])}",
+                        (15, 118), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+            if mode == "PASSIVE" and shared["want"]:
+                tag = f"VLM: {v or 'thinking...'}"
+                if vlm_phone:
+                    tag += f"   phone={vlm_phone}"
+                cv2.putText(frame, tag, (15, 152),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+            cv2.putText(frame, f"HAND: {hand_dbg}", (15, h - 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                        (0, 255, 0) if hand_dbg == "OK" else (0, 165, 255), 2)
+            if mode == "ACTIVE" and progress > 0 and armed:
+                cv2.rectangle(frame, (15, 165), (315, 185), (80, 80, 80), 1)
+                cv2.rectangle(frame, (15, 165), (15 + int(300 * progress), 185),
+                              (0, 255, 0), -1)
+
+            if snap:          # annotated evidence frame for this decision
+                cv2.imwrite(os.path.join(
+                    SNAP_DIR, f"{time.strftime('%H%M%S')}_{mode}_{snap}.jpg"), frame)
+                snap = None
+
+            # Relay the annotated frame for the phone app (state_server serves it
+            # at /frame.jpg). Written temp-then-rename so the server never reads a
+            # half-written file, downscaled because it crosses WiFi twice a second.
+            # Its mtime is also the app's heartbeat: decisions are change-triggered,
+            # so a quiet log alone cannot tell "nobody moved" from "system stopped".
+            if now - last_relay >= FRAME_EVERY:
+                last_relay = now
+                small = (cv2.resize(frame, (PROC_WIDTH, int(h * PROC_WIDTH / w)))
+                         if w > PROC_WIDTH else frame)
+                if cv2.imwrite(FRAME_TMP, small, [cv2.IMWRITE_JPEG_QUALITY, 70]):
+                    os.replace(FRAME_TMP, FRAME_PATH)
 
             cv2.imshow("live integrated system", frame)
             key = cv2.waitKey(1) & 0xFF
@@ -196,22 +639,121 @@ def main():
                     cap = cv2.VideoCapture(idx)
                     print(f"Switched to camera index {idx}.")
 
+    shared["stop"] = True
+    lcd.close()
     act.close()
     cap.release()
     cv2.destroyAllWindows()
 
 
+class _P:                                    # tiny landmark stand-in for the selftest
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+
+
+def _fake_hand(wrist_y, knuckle_y, x=0.5):
+    lm = [_P(x, wrist_y) for _ in range(21)]
+    for i in (5, 9, 17):
+        lm[i] = _P(x, knuckle_y)
+    return lm
+
+
 def _selftest():
-    """Router truth table: hand wins instantly; grace holds; timeout -> passive."""
+    """Router + fusion + control-hand truth tables (no camera / no VLM needed)."""
     assert decide_mode("PASSIVE", True, 100.0, 0.0) == "ACTIVE"      # hand -> active
     assert decide_mode("ACTIVE", False, 100.0, 99.5) == "ACTIVE"     # within grace -> held
     assert decide_mode("ACTIVE", False, 103.0, 100.0) == "PASSIVE"   # past grace -> passive
     assert decide_mode("PASSIVE", False, 103.0, 100.0) == "PASSIVE"  # stays passive
+
+    # presence gate: pose says empty -> C, whatever the VLM claims
+    assert fuse_label("C", "T", "A") == "C"
+    assert fuse_label("C", "A", "A") == "C"
+    # someone present + a VLM answer -> the VLM decides the posture, and pose's
+    # own posture reading is ignored entirely (it is unreliable in this room)
+    assert fuse_label("A", "T", "A") == "T"
+    assert fuse_label("T", "A", "T") == "A"
+    assert fuse_label("B", "A", "B") == "A"
+    assert fuse_label("T", "B", "A") == "B"
+    # no VLM answer yet -> HOLD the current profile, never guess from pose.
+    # This is what stops the LEDs switching twice for one event.
+    assert fuse_label("T", None, "A") == "A"
+    assert fuse_label("B", None, "A") == "A"
+    assert fuse_label("A", None, "B") == "B"
+    # somebody just arrived (we were empty) and no answer yet -> transitional
+    assert fuse_label("A", None, "C") == "T"
+    # VLM "empty room" while pose sees somebody is never applied
+    assert fuse_label("A", "C", "A") == "A"
+
+    # a hand high in the frame with nobody matched IS a command
+    assert is_control_hand(_fake_hand(0.3, 0.1), [], 1000, 1000)
+    # a hand on the keyboard (knuckles not above the wrist) is NOT - this is the
+    # bug that pinned the system in ACTIVE while sitting at the desk
+    assert not is_control_hand(_fake_hand(0.90, 0.88), [], 1000, 1000)
+    # people entries: (box, posture, ratio, head_y). The hand's knuckles sit at
+    # y=300 in every case below.
+    # fingers up near the chin are NOT a command: knuckles (300) below the eyes
+    # (250). The accidental OPEN PALM that switched the TV on 2026-11-14.
+    chin = [((300, 200, 700, 1300), "sitting", 0.0, 250)]
+    assert not is_control_hand(_fake_hand(0.5, 0.3), chin, 1000, 1000)
+    # knuckles above the face IS a command
+    raised = [((300, 200, 700, 1300), "sitting", 0.0, 400)]
+    assert is_control_hand(_fake_hand(0.5, 0.3), raised, 1000, 1000)
+    # REGRESSION: the raised hand stretches the box top up to the fingertips
+    # (y1=100). Comparing with the box top rejected every well-tracked raised
+    # hand; comparing with the face (400) accepts it.
+    stretched = [((300, 100, 700, 1300), "sitting", 0.0, 400)]
+    assert is_control_hand(_fake_hand(0.5, 0.3), stretched, 1000, 1000)
+    # a phantom "person" on a chair has its "face" low (650); the hand clears it
+    # but not the real person's face (250): it must NOT count as raised
+    phantom = [((300, 600, 700, 900), "lying", 0.0, 650),
+               ((300, 200, 700, 1300), "sitting", 0.0, 250)]
+    assert not is_control_hand(_fake_hand(0.5, 0.3), phantom, 1000, 1000)
+
+    # engine wiring: Moondream by default, and `qwen` really swaps everything
+    assert ask is moondream_vlm.ask and VLM_NAME == moondream_vlm.MODEL
+    assert PRESENCE_CONFIRM_SECONDS == 10.0 and VLM_MIN_INTERVAL == 1.0
+    use_qwen()
+    assert ask is classify_passive.ask and parse_label is classify_passive.parse_label
+    assert PRESENCE_CONFIRM_SECONDS is None and VLM_MIN_INTERVAL == 3.0
+
+    # RO3 latency instrumentation: the two fields go at the END of the header so
+    # a parser reading by column index keeps working on older logs.
+    assert LOG_FIELDS[-2:] == ["decide_latency_ms", "actuate_latency_ms"]
+    assert LOG_FIELDS[:11] == ["time", "mode", "people", "pose", "vlm", "phone",
+                               "vlm_latency_s", "profile", "light", "fan", "tv"]
+    calls = []
+    ms = timed_set(type("A", (), {"set": lambda self, *a: calls.append(a)})(), [1, 0, 1])
+    assert calls == [(1, 0, 1)] and isinstance(ms, float) and ms >= 0
+    assert since_ms(time.time()) >= 0
+
+    # The relay's temp name must stay a .jpg: OpenCV chooses its encoder from the
+    # extension, and a ".tmp" suffix made imwrite throw and killed the whole run.
+    assert FRAME_TMP.endswith(".jpg") and FRAME_TMP != FRAME_PATH
+
+    # A log with an older header is rotated aside, not appended to or destroyed.
+    import contextlib, io as _io, tempfile
+    with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(_io.StringIO()):
+        p = os.path.join(d, "live_log.csv")
+        with open(p, "w") as f:
+            f.write("time,mode,profile\n10:00:00,PASSIVE,A\n")
+        assert rotate_stale_log(p) is True
+        assert not os.path.exists(p)                       # moved out of the way
+        kept = [n for n in os.listdir(d) if n != "live_log.csv"]
+        assert len(kept) == 1 and open(os.path.join(d, kept[0])).read().endswith("PASSIVE,A\n")
+        with open(p, "w", newline="") as f:
+            csv.DictWriter(f, fieldnames=LOG_FIELDS).writeheader()
+        assert rotate_stale_log(p) is False                # current header: left alone
+
+    assert set(FUSED_APP) == {"T", "A", "B", "C"}            # every profile mapped
+    assert FUSED_APP["C"] == (0, 0, 0) and FUSED_APP["A"] == (1, 1, 1)
     print("selftest ok")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "selftest":
+    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    if arg == "selftest":
         _selftest()
     else:
+        if arg == "qwen":
+            use_qwen()
         main()

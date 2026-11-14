@@ -39,7 +39,7 @@ import mediapipe as mp
 from serial_actuator import Actuator
 import camera
 
-CAMERA_INDEX = camera.find_index()   # finds the iPhone by name (see camera.py)
+# ponytail: camera resolved in main(), not at import (see live_passive.py).
 CONFIRM_FRAMES = 3      # consecutive frames a gesture must agree to count
 HOLD_SECONDS = 1.0      # how long the candidate must be held to fire
 REARM_SECONDS = 0.4     # neutral time before a new command can fire
@@ -114,9 +114,10 @@ def led_state(tv_on, lights_on):
 
 
 def main():
-    cap = cv2.VideoCapture(CAMERA_INDEX)
+    camera_index = camera.find_index()
+    cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
-        raise SystemExit(f"Could not open camera index {CAMERA_INDEX}.")
+        raise SystemExit(f"Could not open camera index {camera_index}.")
 
     act = Actuator()            # board, or mock mode if unplugged
 

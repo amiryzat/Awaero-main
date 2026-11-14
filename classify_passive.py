@@ -29,7 +29,15 @@ import time
 
 import ollama
 
-MODEL = "qwen3-vl:8b"   # swapped from moondream (lecturer's call)
+# Benchmarked 2026-11-14 on the 12 labelled iPhone frames (640px, think=False):
+#   qwen3-vl:4b  12/12 (100%)  mean 20.0 s   <- chosen
+#   qwen3-vl:8b  12/12 (100%)  mean 31.4 s   (no better, twice the memory)
+#   qwen3-vl:2b  11/12  (92%)  mean 19.1 s   (no faster, less accurate)
+#   moondream    3/12   (25%)  mean  3.6 s   (fast because it answers "C" to
+#                                             almost everything - unusable)
+# 2b and 4b being the same speed says latency is dominated by the VISION
+# ENCODER, not the language model size, so shrinking further buys nothing.
+MODEL = "qwen3-vl:4b"
 
 CLASSIFY_PROMPT = (
     "You classify a room for energy control. Reply with ONE letter only, no other "
@@ -45,6 +53,22 @@ CLASSIFY_PROMPT = (
 # temperature 0 = deterministic. Thinking goes to a separate field; content is the
 # clean letter. ~3 s/frame. ponytail: raise num_predict only if answers truncate.
 OPTIONS = {"temperature": 0}
+
+# Live-only variant: same letter contract plus a phone-usage flag, logged as scene
+# metadata (it does NOT change control - fusion still ignores the VLM for lying).
+# Kept separate so the offline accuracy eval above stays on the validated one-letter
+# prompt. ponytail: re-run the eval if you ever fold this back into CLASSIFY_PROMPT,
+# extra instructions can shift the letter.
+CLASSIFY_PROMPT_PHONE = (
+    "You classify a room for energy control. Reply with the letter then the phone "
+    "flag, nothing else, like 'A phone=no':\n"
+    "T = a person standing or walking\n"
+    "A = a person sitting\n"
+    "B = a person lying down or resting\n"
+    "C = no person present\n"
+    "phone=yes if the person is holding or looking at a phone, else phone=no\n"
+    "Answer:"
+)
 
 FRAMES_DIR = "frames"
 CSV_OUT = "classify_results.csv"
@@ -65,12 +89,32 @@ def parse_label(answer):
     return "?"
 
 
+def parse_phone(answer):
+    """'yes'/'no' from a phone=... flag in the reply, else '' (unknown)."""
+    a = answer.lower()
+    if "phone=yes" in a:
+        return "yes"
+    if "phone=no" in a:
+        return "no"
+    return ""
+
+
+# Qwen3-VL reasons before answering, and for a one-letter classification that
+# reasoning is pure cost. Measured over 6 labelled frames (2026-11-14, 640px):
+#   thinking ON  -> 6/6 correct, mean 19.6 s
+#   thinking OFF -> 6/6 correct, mean 10.0 s
+# Half the latency, no accuracy loss, so thinking is off. Verified on Ollama
+# 0.35.0; older servers may not accept the think= argument.
+THINK = False
+
+
 def ask(image, prompt):
     t0 = time.time()
     response = ollama.chat(
         model=MODEL,
         messages=[{"role": "user", "content": prompt, "images": [image]}],
         options=OPTIONS,
+        think=THINK,
     )
     return response["message"]["content"].strip(), time.time() - t0
 

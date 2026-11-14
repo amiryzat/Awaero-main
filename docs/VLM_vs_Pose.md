@@ -1,83 +1,96 @@
-# Passive engine: designed VLM vs implemented pose improvement
+# Passive engine: how the VLM and pose ended up sharing the job
 
-Draft text for Chapter 3 (design evolution note) and Chapter 4 (results /
-comparison). Framing: the VLM approach is the **designed** passive engine in the
-methodology; the pose-based engine is an **implemented improvement** discovered
-during Stage 3 (Implementation) of the Waterfall process. Both are real; the
-thesis presents the move from one to the other as an engineering outcome, not a
-scope change.
+Draft text for Chapter 3 (design evolution note) and Chapter 4 (results). Every
+number comes from `EVAL_passive_vlm.md`; the live evidence (logs, frames) is in
+`archive/`. Rewritten 2026-11-14: the earlier draft said pose replaced the VLM,
+which live testing contradicted.
 
-Fill the bracketed [[numbers]] from your RO3 evaluation runs before submitting.
+Framing: the VLM is the designed passive engine (Chapter 3). During Stage 3
+(Implementation), testing showed that pose estimation and the VLM each fail where
+the other succeeds, so the implemented system divides the work between them:
+pose decides **whether** someone is present, the VLM decides **what** they are
+doing. This changes only the Inference and Decision Logic layers; Perception,
+Mode Selection and Actuation are as designed.
+
+**Engine:** Moondream (decided 2026-11-14, and the model Chapter 3 specifies).
+Qwen3-VL is presented as the evaluated alternative.
 
 ---
 
 ## For Chapter 3 (end of the Inference Layer / Passive Branch section)
 
-> The passive branch was originally designed around the Moondream2
-> vision-language model (Section 3.4.3), chosen for its local, privacy-preserving
-> semantic reasoning. During implementation, controlled testing of this designed
-> engine exposed three limitations that are intrinsic to running a general VLM on
-> an edge node for continuous room monitoring:
+> The passive branch was designed around a vision-language model (VLM) sampling
+> the scene periodically. During implementation, a geometric pose estimator
+> (MediaPipe Pose, up to four people per frame) was added alongside it, and live
+> testing in the target room established a division of labour based on measured
+> failure modes.
 >
-> 1. **Latency.** Moondream2 runs at approximately 1 to 2 seconds per frame on
->    the local Metal GPU, which forces the 3-second passive sampling interval and
->    introduces a visible delay between a change in room activity and the
->    actuation response.
-> 2. **Single-person reasoning.** The semantic prompt describes "the person" in
->    the scene and does not reliably reason about multiple occupants at once,
->    which the evaluation environment (a shared room) can contain.
-> 3. **Hallucination.** The model occasionally reported a person in an empty
->    scene (for example inferring an occupant from a chair), producing false
->    occupancy classifications.
+> Pose estimation runs in real time and reliably answers whether a person is
+> present, but it cannot read posture from a single fixed camera: a person
+> leaning forward over a desk compresses the shoulder-to-hip axis in the same
+> way as a person lying towards the camera, and the body-extent ratios of
+> sitting and standing overlap. Three geometric rules were implemented and
+> rejected on this evidence. Pose estimation also produces phantom detections on
+> furniture with landmark confidence indistinguishable from real people.
 >
-> To address these limitations while preserving the same five-layer architecture,
-> actuation mapping, and energy profiles, the passive inference engine was
-> re-implemented using a geometric pose-estimation approach (MediaPipe Pose)
-> during Stage 3. Posture is derived from the torso-axis angle of each detected
-> skeleton, and the room profile is assigned from the most active occupant. This
-> substitution changes only the Inference Layer; the Perception, Mode Selection,
-> Decision Logic, and Actuation layers are unchanged, so the move is an internal
-> engineering refinement rather than a redesign of the system. The original
-> Moondream2 engine is retained as the designed baseline and is evaluated against
-> the pose-based engine in Chapter 4.
+> The VLM reads posture correctly from scene context but is slower and, depending
+> on its prompt, can overlook people. The implemented Decision Logic Layer
+> therefore uses pose for presence and the VLM for posture (Transitional, Active
+> or Resting). While no VLM answer is available the current profile is held
+> rather than estimated, which prevents appliances switching twice for a single
+> change in activity. When the VLM is fast enough (Moondream2, about 2 seconds
+> per answer), the room is additionally treated as occupied only if the VLM has
+> described a person within the last 10 seconds, which removes the pose
+> phantoms.
 
 ## For Chapter 4 (comparison subsection)
 
-> Both passive engines were evaluated on the same labelled frame set captured
-> from the final camera position. The Moondream2 baseline is the engine specified
-> in the design; the MediaPipe Pose engine is the implemented improvement.
+### Inference engines on the labelled set (12 frames, iPhone 12 room scene)
 
-### Comparison
-
-| Criterion | Moondream2 (designed) | MediaPipe Pose (implemented) |
+| Engine | Accuracy | Latency / frame |
 |---|---|---|
-| Inference latency / frame | ~1-2 s (Metal GPU) | [[fill: ~ms, real-time]] |
-| Sampling interval forced | 3 s | none (per-frame) |
-| Occupants reasoned about | one ("the person") | multiple (num_poses=4) |
-| False occupancy (empty scene) | occurs (chair -> person) | none observed |
-| Classification accuracy (labelled set) | [[fill, e.g. 100%]] | [[fill]] |
-| Output granularity | rich semantic (activity words) | posture geometry (upright / lying) |
-| Privacy (local only) | yes | yes |
+| Moondream2, "Describe this image." + keywords | 7/12 (58%) | 1.0 s (60-token cap) |
+| **Moondream2, "Describe the people in this image." + keywords** | **12/12** | **0.82 s** |
+| Qwen3-VL-4B, one-letter prompt, thinking off | 12/12 | ~20 s |
+| Qwen3-VL-8B, one-letter prompt, thinking off | 12/12 | ~31 s |
 
-### Honest trade-off (keep this, examiners reward it)
+On 70 eye-checked frames from live testing, the people-focused prompt mentioned
+a person in every frame that contained one (including 12 lying-down frames the
+scene prompt had missed) and in none of the 41 empty frames. A prompt that
+presupposed a person ("Describe the person in this image...") invented one in
+all 41 empty frames.
 
-> The pose-based engine is faster, multi-person, and free of the hallucination
-> failure mode, which is why it was adopted for the live demonstration. The
-> trade-off is a loss of semantic richness: the VLM can distinguish fine
-> activities from scene context (for example "reading" versus "watching
-> television"), whereas the pose engine infers only coarse posture (upright
-> versus lying). For the four energy profiles this coarse signal is sufficient,
-> but applications needing finer activity context would favour the VLM or a
-> hybrid of the two. Both engines share the same hard limit: a visible-light
-> camera cannot classify a person it cannot capture in full darkness.
+### Pose vs VLM, by role
+
+| Question | Pose (MediaPipe) | VLM (Moondream2, people prompt) |
+|---|---|---|
+| Is anyone present? | real time, but phantoms on furniture at ~1.00 confidence | 0 misses in 29 person frames, 0 false people in 41 empty |
+| Sitting / standing / lying? | unreliable here (three rules failed) | 12/12 labelled; caught lying 12/12 where the scene prompt got 1/12 |
+| Speed | ~30 fps | ~2 s per answer live |
+| Multiple people | up to 4, boxed individually | described together |
+
+### Live system result (Moondream configuration)
+
+| Measure | Result |
+|---|---|
+| VLM latency, live | 1.87 s mean, 3.6 s max (199 answers, flat) |
+| Leaving the room -> unoccupied | 10-18 s (was 68 s with the scene prompt) |
+| Gesture activations | 10 of 10 deliberate (0 false) |
+
+### Honest trade-offs (keep these; examiners reward them)
+
+> The VLM's latency means a posture change is reflected after a few seconds
+> rather than instantly; this was preferred to an instant but unstable signal
+> that switched appliances twice per event. Occupancy detection is only as good
+> as the camera's field of view: in the test room the camera also sees a hallway,
+> so a person standing there is counted as present. A visible-light camera cannot
+> perceive a person in complete darkness; an infrared camera is the production
+> answer. Finally, the VLM's behaviour depends strongly on prompt wording, so the
+> chosen prompt was validated on empty rooms as well as occupied ones.
 
 ---
 
-## One open item this does NOT resolve
-
-The design documents **four** passive profiles (T Transitional, A Active,
-B Resting, C Unoccupied). The current pose engine produces **three** (A/B/C); it
-has no Transitional/standing state. If the evaluation must cover all seven
-documented response paths (4 passive + 3 active), either add a T rule to the
-pose engine (standing-but-moving posture) or justify in Chapter 4 why pose
-collapses T into A. Decide this with the supervisor.
+## Thesis numbers still to collect (RO3)
+- >=10 trials per response path (4 passive + 3 active = 7 paths, >=70 points).
+- End-to-end response time per transition (camera to LED), per mode.
+- Simulated Appliance Activation Reduction (exact mandated term).

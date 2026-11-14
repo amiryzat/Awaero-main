@@ -39,6 +39,7 @@ def find_port():
 class Actuator:
     def __init__(self, port=None):
         self.ser = None
+        self.port = None          # the port actually opened (the LCD driver avoids it)
         if serial is None:
             print("[actuator] pyserial not installed - mock mode")
             return
@@ -48,6 +49,7 @@ class Actuator:
             return
         try:
             self.ser = serial.Serial(port, BAUD, timeout=1)
+            self.port = port
             time.sleep(2)  # Arduino resets on connect; wait for it
             print(f"[actuator] connected on {port}")
         except Exception as e:
@@ -59,6 +61,12 @@ class Actuator:
         if self.ser:
             try:
                 self.ser.write(msg.encode())
+                # write() only fills the OS buffer. flush() asks for it to drain,
+                # but on macOS USB-serial it still returns in ~0.1 ms, so the
+                # timing around this call measures HOST-SIDE write time only, not
+                # the moment the LED changes. Measured 0.1 ms over 6 writes
+                # (2026-11-14). A true end-to-end number needs the Arduino to ack.
+                self.ser.flush()
                 return
             except Exception as e:
                 print(f"[actuator] write failed: {e}")
