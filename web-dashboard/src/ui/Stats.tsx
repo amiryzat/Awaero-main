@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Metrics, Profile, Stat } from "../lib/types";
 import type { MetricsWindow } from "../lib/useSystem";
 
@@ -193,23 +193,49 @@ function LatencyCard({ metrics }: { metrics: Metrics }) {
 function InsightModal({ title, onClose, children }: {
   title: string; onClose: () => void; children: React.ReactNode;
 }) {
+  const [show, setShow] = useState(false);   // false = enter-from / exit-to state
+  const calm = reduceMotion();
+
+  // play the enter transition on the frame after mount
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const id = requestAnimationFrame(() => setShow(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  // play the exit transition, then unmount after it finishes
+  const close = useCallback(() => {
+    if (calm) { onClose(); return; }
+    setShow(false);
+    const id = setTimeout(onClose, 190);
+    return () => clearTimeout(id);
+  }, [onClose, calm]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [close]);
+
   return (
-    <div onClick={onClose} style={{
-      position: "fixed", inset: 0, zIndex: 100, background: "rgba(12,22,42,0.45)",
+    <div onClick={close} style={{
+      position: "fixed", inset: 0, zIndex: 100,
+      background: "rgba(18,28,48,0.18)",
+      backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
       display: "flex", alignItems: "center", justifyContent: "center", padding: 14,
+      opacity: calm || show ? 1 : 0,
+      transition: "opacity 180ms var(--ease-out, ease)",
     }}>
       <div onClick={(e) => e.stopPropagation()} className="card" style={{
         width: "100%", maxWidth: 520, maxHeight: "82vh", overflow: "auto",
-        boxShadow: "0 12px 40px rgba(0,0,0,0.25)",
+        boxShadow: "0 12px 40px rgba(0,0,0,0.22)",
+        transformOrigin: "center",
+        transform: calm || show ? "scale(1)" : "scale(0.92)",
+        opacity: calm || show ? 1 : 0,
+        transition: "transform 200ms cubic-bezier(.2,.8,.25,1), opacity 170ms var(--ease-out, ease)",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <h3 style={{ fontSize: 17 }}>{title}</h3>
-          <button className="pill" onClick={onClose} aria-label="Close"
+          <button className="pill" onClick={close} aria-label="Close"
             style={{ padding: "4px 12px", fontSize: 16, lineHeight: 1 }}>×</button>
         </div>
         {children}
