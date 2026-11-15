@@ -116,7 +116,12 @@ def use_qwen():
 # overwrite every gesture immediately and gesture control would be pointless.
 # The hold is PER APPLIANCE and also ends early when the room context changes.
 OVERRIDE_SECONDS = 60.0
-GESTURE_HOLDS = {"peace": [0], "open_palm": [2], "fist": [0, 1, 2]}  # light,fan,tv
+# peace/open_palm hold just the appliance they touch for OVERRIDE_SECONDS. Fist
+# holds NOTHING here: its persistence comes from leaving_latch (all-off until the
+# room empties or ANY gesture cancels it). If fist also set 60 s holds, a "changed
+# my mind" gesture would release the latch but the fan/TV would stay stuck off
+# under those holds - so the latch alone owns the fist.
+GESTURE_HOLDS = {"peace": [0], "open_palm": [2], "fist": []}  # light,fan,tv
 
 # Decision Logic Layer (Layer 4): each profile -> a per-appliance on/off vector.
 # The 3 pins are RELABELLED from the green/yellow/red traffic light to appliances:
@@ -285,6 +290,38 @@ def fuse_label(pose_label, vlm_label, current="C"):
     return current if current in ("T", "A", "B") else "T"
 
 
+# Posture debounce. The 4 s vote window above smooths POSE frame jitter, but it
+# does NOT damp the VLM: one VLM read is replicated across every frame until the
+# next read, so a single answer floods the window and saturates it in ~1 s. The
+# VLM flip-flops T<->A on a static desk scene (and once read a standing person as
+# A -> all appliances on). So debounce the VLM READ SEQUENCE, not frames: require
+# N consecutive distinct reads to agree before the posture fed to fusion changes.
+# N is the tunable knob (raise it = stickier, slower; lower it = twitchier).
+POSTURE_DEBOUNCE_N = 2
+
+def leave_target(latch, committed):
+    """Appliance vector under the fist 'leaving' latch: all-off while the latch
+    is held and someone is still present, otherwise the normal profile mapping.
+    The caller clears the latch when this returns the normal mapping."""
+    if latch and committed != "C":
+        return (0, 0, 0)
+    return FUSED_APP[committed]
+
+def debounce_vlm(label, history, stable, n=POSTURE_DEBOUNCE_N):
+    """Call once per NEW VLM read. Returns the posture to feed fusion; mutates
+    history (a deque of the last n real reads) in place. A None / phone-only read
+    does not count and leaves the stable value untouched. The posture only moves
+    once the last n reads all agree, so an alternating T/A scene just HOLDs."""
+    if label not in ("T", "A", "B"):     # None or stale: don't let it reset the run
+        return stable
+    history.append(label)
+    while len(history) > n:
+        history.popleft()
+    if len(history) == n and all(l == history[0] for l in history):
+        return history[0]
+    return stable
+
+
 def main():
     from live_passive import (
         analyse, enhance_if_dark, SMOOTH_SECONDS, SWITCH_RATIO, MIN_VOTES,
@@ -348,6 +385,7 @@ def main():
 
     window = deque()                         # passive smoothing (holds fused labels)
     committed = "C"
+    leaving_latch = False                    # fist "leaving": hold all-off until C
 
     tv_on = lights_on = False                # active gesture state
     recent = deque(maxlen=CONFIRM_FRAMES)
@@ -358,6 +396,9 @@ def main():
     stable = "none"
     progress = 0.0
     v = None                                 # latest VLM label, for the overlay
+    vlm_stable = None                        # posture after debounce (fed to fusion)
+    vlm_hist = deque()                        # last N distinct VLM reads
+    last_vts = -1.0                           # ts of the last read we debounced
     vlm_phone = ""
     vlm_lat = ""
     vctx = None                              # pose reading the VLM was judging
@@ -492,6 +533,9 @@ def main():
                             tv_on, lights_on = apply(stable, tv_on, lights_on)
                             if stable == "fist":
                                 appl[1] = 0          # all-off override kills the fan too
+                                leaving_latch = True # "leaving": stay off until room empties
+                            else:
+                                leaving_latch = False  # a staying gesture cancels the latch
                             appl[0], appl[2] = int(lights_on), int(tv_on)
                             for i in GESTURE_HOLDS.get(stable, []):
                                 hold_until[i] = now + OVERRIDE_SECONDS
@@ -508,6 +552,11 @@ def main():
             else:  # PASSIVE
                 if prev_mode == "ACTIVE":
                     window.clear()
+                    # Log the ACTIVE->PASSIVE flip so the app/LCD don't freeze on
+                    # ACTIVE until the next profile change (can be minutes away).
+                    log_row(time=time.strftime("%H:%M:%S"), mode="PASSIVE",
+                            people=len(people), profile=committed,
+                            light=appl[0], fan=appl[1], tv=appl[2])
 
                 # feed the VLM a clean frame when a person is present (upright -> it
                 # splits T/A; lying -> it only supplies the phone flag, which the
@@ -524,10 +573,17 @@ def main():
                         vlm_lat, vts, vctx = vlm["latency"], vlm["ts"], vlm["pose_ctx"]
                     if now - vts > VLM_STALE_SECONDS:   # too old to trust
                         v = None
+                    elif vts != last_vts:               # a NEW distinct VLM read
+                        last_vts = vts
+                        vlm_stable = debounce_vlm(v, vlm_hist, vlm_stable)
                 else:
                     v, vlm_phone, vlm_lat, vctx = None, "", "", None
 
-                fused = fuse_label(pose_label if present else "C", v, committed)
+                # Feed fusion the DEBOUNCED posture, not the raw read: raw v stays
+                # in the log as the honest VLM evidence, but a single flip no
+                # longer moves the LEDs.
+                feed = vlm_stable if v in ("T", "A", "B") else None
+                fused = fuse_label(pose_label if present else "C", feed, committed)
                 window.append((now, fused))
                 while window and now - window[0][0] > SMOOTH_SECONDS:
                     window.popleft()
@@ -547,7 +603,14 @@ def main():
                 # Drive every appliance that is NOT currently held by a gesture.
                 # Held ones keep the user's choice until their hold expires, so a
                 # gesture is respected without disabling the automation forever.
-                target = FUSED_APP[committed]
+                # Fist "leaving" latch: hold everything off until the room actually
+                # empties (C), so a fist on the way out is not undone 6 s later when
+                # ACTIVE drops to PASSIVE and re-commits a profile.
+                if leaving_latch and committed != "C":
+                    target = leave_target(True, committed)
+                else:
+                    leaving_latch = False
+                    target = leave_target(False, committed)
                 if any(now >= hold_until[i] and appl[i] != target[i] for i in range(3)):
                     for i in range(3):
                         if now >= hold_until[i]:
@@ -683,6 +746,23 @@ def _selftest():
     assert fuse_label("A", None, "C") == "T"
     # VLM "empty room" while pose sees somebody is never applied
     assert fuse_label("A", "C", "A") == "A"
+
+    # posture debounce: N=2 reads must agree before the posture moves
+    h = deque()
+    assert debounce_vlm("A", h, None, n=2) is None          # one read: not enough
+    assert debounce_vlm("A", h, None, n=2) == "A"           # two agree -> switch
+    assert debounce_vlm("T", h, "A", n=2) == "A"            # one dissent: hold A
+    assert debounce_vlm("A", h, "A", n=2) == "A"            # T,A -> no 2 in a row
+    assert debounce_vlm("T", h, "A", n=2) == "A"            # A,T -> still holds
+    assert debounce_vlm("T", h, "A", n=2) == "T"            # T,T -> now switches
+    assert debounce_vlm(None, h, "T", n=2) == "T"           # None read: ignored
+    assert list(h) == ["T", "T"]                            # None didn't enter history
+
+    # fist "leaving" latch: all-off while present, resumes once the room empties
+    assert leave_target(True, "A") == (0, 0, 0)             # latched + present -> off
+    assert leave_target(True, "T") == (0, 0, 0)
+    assert leave_target(True, "C") == FUSED_APP["C"]        # empty -> normal (all off)
+    assert leave_target(False, "A") == FUSED_APP["A"]       # no latch -> normal profile
 
     # a hand high in the frame with nobody matched IS a command
     assert is_control_hand(_fake_hand(0.3, 0.1), [], 1000, 1000)

@@ -135,12 +135,26 @@ arduino-cli upload -p /dev/cu.usbmodem1201 --fqbn arduino:avr:uno arduino/power_
   per-appliance 60 s override). Evening: Moondream runner; people-focused prompt
   (lying 1/12 -> 12/12, empty 41/41); VLM-confirmed presence beats pose phantoms;
   leaving -> C in 10-18 s. Full numbers in `EVAL_passive_vlm.md`.
+- **2026-11-15 (late)**: Three live-run fixes BUILT + VALIDATED in a second run.
+  (1) **Posture debounce** (`debounce_vlm`, N=2): the VLM read SEQUENCE is now
+  debounced, not frames (one VLM read floods the 4 s frame window in ~1 s, so it
+  never damped the VLM). (2) **Fist "leaving" latch**: all-off until the room
+  empties (C) or ANY gesture cancels it; fist no longer sets per-appliance holds
+  (`GESTURE_HOLDS["fist"]=[]`) so a "changed my mind" gesture fully resumes auto.
+  (3) **ACTIVE->PASSIVE log row** so the app/LCD stop freezing on ACTIVE. All
+  three confirmed in `live_log.csv`. Also: each trial now logs `vlm_latency_s`
+  (detection latency) alongside decide/actuate. **After-fix run: 77 trials, 89.6%
+  raw; A 11/11 and B 10/10 both hit 100% (were 90/80 - the VLM-flicker victims);
+  once the operator's timing settled (after 21:00) 50/51 = 98.0%.** T dipped to
+  75% but all 3 misses were front-loaded while learning the new ~2-read lag (T
+  passed 8/8 after 20:57). Before set archived as
+  `archive/trials_before_debounce_2026-11-15.csv`. Dashboard: countdown lifted to
+  App so it survives tab switches (floating banner on every tab), 15 s delay added.
 - **2026-11-15 (eve)**: Local web dashboard "Awaero" BUILT (React+Vite, served by
   state_server.py at `/`). **Trials recorder BUILT** - the RO3 instrument (declare
   ground truth, server scores its own live decision, capture countdown for B/C).
-  First real run: **73 trials, 94.5%** (T 11/11, A 9/10, B 8/10, C 10/10) in
-  `trials.csv`. Live-run flaws found + ranked fixes (posture debounce, fist latch,
-  app/LCD mode lag) - see CHECKLIST.md "Fixes to do". `lcd_scroll.py` util added.
+  First real run (BEFORE the fixes): **73 trials, 94.5%** (T 11/11, A 9/10, B 8/10,
+  C 10/10). Live-run flaws found + ranked fixes. `lcd_scroll.py` util added.
 - **2026-11-13**: Integrated entrypoint `live_system.py`; LEDs relabelled per
   appliance; decision logging; Blender room model.
 - **2026-11-12**: Qwen3-VL swap; dataset recaptured from the iPhone 12.
@@ -149,12 +163,13 @@ arduino-cli upload -p /dev/cu.usbmodem1201 --fqbn arduino:avr:uno arduino/power_
 - **2026-11-10**: Arduino LED actuation built and wired (`HANDOFF.md`).
 
 ## Next
-- **Posture debounce in `live_system.py`** (N consistent VLM reads before switching)
-  - kills the T<->A flicker AND the standing->A misfire. Highest value. Then one
-  clean trial re-run (keep both sets for a before/after in Ch 4).
-- Then: fist "leaving" latch; log a PASSIVE row on ACTIVE->PASSIVE return.
-- End-to-end camera->LED response time table per transition (latency per trial is
-  already captured; needs the wall-clock table).
-- Gesture accuracy table (recorder supports it; gesture trials not yet to 10 each).
+- The three live-run fixes are DONE + validated. RO3 postures AND gestures now have
+  >=10 trials each (A 11, T 12, B 10, C 10, open_palm 12, peace 12, fist 10).
+- End-to-end camera->LED response time table per transition: per-trial `vlm_latency_s`
+  + decide/actuate are now logged; still want the wall-clock per-transition table.
+- Known limitations to document (not bugs): ~20 s to confirm unoccupied is deliberate
+  `EMPTY_SECONDS` hysteresis; a person bent over the desk can read as A (sitting) then
+  self-correct to T - the standing-vs-sitting-when-bent case is genuinely ambiguous.
 - For the viva: one network we control (hotspot/pocket router), both devices on it.
-- Writing: Chapter 3 (fusion), Chapter 4 (94.5% baseline + improved), Chapter 5.
+- Writing: Chapter 3 (fusion), Chapter 4 (94.5% before vs 98% settled after + the
+  A/B->100% story, with the T-lag tradeoff), Chapter 5.

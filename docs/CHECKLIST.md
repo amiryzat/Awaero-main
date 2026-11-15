@@ -105,34 +105,36 @@ Last updated: 2026-11-15. Newest live-state pointer: `docs/RESUME.md`.
 - [ ] Manual override (Controls -> `override.json` -> system), PRD Phase 6-7.
       Controls tab is still read-only
 
-### Fixes to do (flaws seen in the 2026-11-15 live run, ranked)
-These are the three that actually move appliances wrong; the rest are cosmetic.
-- [ ] **1. Posture debounce (highest value).** The VLM flip-flops T<->A on the same
-      desk scene every ~2 s (18:32-18:34 in `live_log.csv`), flapping the light/
-      fan/TV on and off. Require N consistent VLM reads before switching profile.
-      Kills the flicker AND the standing-read-as-A misfire below. In `live_system.py`
-- [ ] **2. Fist "leaving" latch.** Fist turns all off, but when ACTIVE ends (6 s)
-      PASSIVE re-commits A and powers everything back on. For the "turn off before I
-      leave" intent, latch all-off until the room empties (C) or another gesture.
-      Read the gesture-override hold code first. In `live_system.py`
-- [ ] **3. Log a PASSIVE row on every ACTIVE->PASSIVE return.** The app froze on the
-      last gesture (showed ACTIVE) for a 5-min gap while the LCD correctly showed
-      PASSIVE - the app is decision-triggered, the LCD is frame-triggered. Small fix
+### Fixes from the 2026-11-15 live run - ALL DONE + VALIDATED (2026-11-15 late)
+- [x] **1. Posture debounce.** Root cause was subtler: the 4 s vote window smooths
+      POSE frames, but one VLM read floods it in ~1 s so it never damped the VLM.
+      Fix debounces the VLM READ SEQUENCE (`debounce_vlm`, `POSTURE_DEBOUNCE_N=2`).
+      Validated: A 90->100%, B 80->100%. Cost: T ~1 read slower (documented)
+- [x] **2. Fist "leaving" latch** (`leave_target` + `leaving_latch`). All-off until
+      the room empties (C) or ANY gesture cancels it. Fist sets no per-appliance
+      holds now (`GESTURE_HOLDS["fist"]=[]`) so a "changed my mind" gesture fully
+      resumes auto (fan/TV no longer stuck off ~60 s). Confirmed `fist->PASSIVE A`
+      stayed 0,0,0 in `live_log.csv`
+- [x] **3. PASSIVE row on ACTIVE->PASSIVE return.** Confirmed a PASSIVE row logs
+      ~3 s after every ACTIVE; app/LCD no longer freeze on ACTIVE
 - [ ] Cosmetic (not decision-affecting): pose phantom box parks on the clothes rail
       when you lie down (VLM still gives the right B); pose "0 ppl" when an arm is
       raised. Known limitations, document for Q&A, no fix needed
 
 ### Evaluation (RO3)
-- [x] **>=10 trials per response path - DONE (2026-11-15).** 73 trials via the Trials
-      recorder: T 11, A 10, B 10, C 10 + gestures. Overall 94.5%. Data in `trials.csv`.
-      Re-run cleanly once the posture debounce lands (A/B misses were the VLM flaw)
-- [~] End-to-end response time per transition (camera -> LED), per mode: each trial
-      row now carries `decide_latency_ms` + `actuate_latency_ms`; decide ~24 ms p50,
-      actuate ~0.1 ms. Still need the per-transition camera->LED wall-clock table
+- [x] **>=10 trials per response path - DONE twice.** BEFORE (73, 94.5%):
+      `archive/trials_before_debounce_2026-11-15.csv`. AFTER the fixes (77, 89.6% raw;
+      98.0% once timing settled): `trials.csv`. Per-path after: A 11/11, B 10/10 (both
+      100%), C 9/10, T 9/12 (misses front-loaded while learning the debounce lag)
+- [x] **Gesture accuracy - DONE (>=10 each).** open_palm 12/12 (100%), peace 9/12,
+      fist 9/10 - in `trials.csv`. Early peace/fist misses were gesture-registration
+      while learning, not the posture path
+- [~] End-to-end response time per transition (camera -> LED): each trial row now
+      carries `vlm_latency_s` (detection) + `decide_latency_ms` + `actuate_latency_ms`;
+      decide ~24 ms p50, actuate ~0.1 ms, VLM ~1.4-1.9 s. Still need the
+      per-transition camera->LED wall-clock table
 - [ ] Report Simulated Appliance Activation Reduction (exact mandated term) - the
       dashboard shows it live (15.6% last window); pull the final number for Ch 4
-- [ ] Gesture accuracy table (3 gestures x >=10 trials) - recorder supports it;
-      gesture trials not yet to 10 each
 
 ### Demo build
 - [ ] Physical cardboard model house with the LEDs as labelled appliances
@@ -158,3 +160,8 @@ These are the three that actually move appliances wrong; the rest are cosmetic.
   Run 14). Harmless: no appliance changes without a completed gesture, and it
   returns to PASSIVE after 6 s
 - Pitch-black rooms: a visible-light camera cannot see; IR is the production fix
+- ~20 s to confirm UNOCCUPIED is DELIBERATE (`EMPTY_SECONDS` hysteresis), not lag -
+  it stops a brief step-out blacking the room and re-powering appliances
+- A person BENT OVER the desk can read as A (sitting) then self-correct to T: standing
+  vs sitting when bent forward is genuinely ambiguous from one camera. The debounce
+  cut the flicker; the residual case is a documented VLM limitation, not a bug

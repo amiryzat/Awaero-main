@@ -2,14 +2,38 @@
 
 Newest-state pointer for a new chat. Read this first, then `CHECKLIST.md`
 (what is built vs not), `CONTEXT.md` (decisions), `PROGRESS.md` (build state).
-Last updated: 2026-11-15 (evening).
+Last updated: 2026-11-15 (late).
 
 ## One-line status
-Web dashboard + Trials recorder BUILT. First real RO3 run done: **73 trials,
-94.5%**. Three real flaws found in the live run, fixes listed and ranked. Next
-step = build the posture debounce, then one clean re-run.
+Dashboard + Trials recorder BUILT. The three live-run fixes are BUILT and
+VALIDATED in a second run. **Before: 73 trials, 94.5%. After: 77 trials, 89.6%
+raw -> A & B both now 100% (were 90/80), and 98.0% (50/51) once operator timing
+settled.** The before/after is the Chapter 4 story. Next = writing + the
+per-transition latency table.
 
-## What happened this session (2026-11-15, afternoon/evening)
+## What happened LATE (2026-11-15, the fixes + validation)
+- **Three fixes built + validated** (all confirmed in `live_log.csv`):
+  1. **Posture debounce** (`debounce_vlm`, `POSTURE_DEBOUNCE_N=2`): the fix is on the
+     VLM READ SEQUENCE, not frames. The old 4 s vote window only smoothed pose
+     frames; one VLM read is copied onto every frame, floods the window in ~1 s, so
+     it never damped the VLM. Now 2 consecutive agreeing reads before the posture
+     switches. Result: A 90->100%, B 80->100% (the two the flicker was wrecking).
+     Cost: standing (T) is ~1 read slower to detect - documented tradeoff.
+  2. **Fist "leaving" latch** (`leave_target` + `leaving_latch`): all-off until the
+     room empties (C) or ANY gesture cancels it. Fist sets NO per-appliance holds
+     anymore (`GESTURE_HOLDS["fist"]=[]`), so if you change your mind, one gesture
+     releases the latch and the automatic profile fully restores (previously the
+     fan/TV stayed stuck off ~60 s). Confirmed: `fist -> PASSIVE A` kept 0,0,0.
+  3. **ACTIVE->PASSIVE log row**: app/LCD no longer freeze on ACTIVE. Confirmed a
+     PASSIVE row logs ~3 s after every ACTIVE.
+- **Per-trial latency**: each trial now records `vlm_latency_s` (detection) with
+  decide/actuate. Shown in the result banner. `trials.csv` migrated to 9 columns.
+- **Dashboard**: capture countdown lifted to App level so it survives tab switches
+  (floating banner on EVERY tab - arm it, switch to Live, watch the profile). 15 s
+  capture delay added.
+- **Before set archived**: `archive/trials_before_debounce_2026-11-15.csv` (73 rows).
+
+## What happened earlier (2026-11-15, afternoon/evening)
 - **Local web dashboard BUILT (React+Vite "Awaero").** Served by `state_server.py`
   at `/` from `web-dashboard/dist/` (login gate + Home/Live/Stats/Trials), follows
   the reference UI, path-traversal guarded, build stamp in the footer. Reachable in
@@ -44,16 +68,19 @@ step = build the posture debounce, then one clean re-run.
 - Passive engine = Moondream (default). pose = presence, VLM = posture, profile HELD
   when no VLM answer. FUSED_APP is authoritative.
 
-## NEXT STEP (just say "go")
-**Build the posture debounce in `live_system.py`** - require N consistent VLM reads
-before switching profile. One change kills flaw #1's flicker AND the standing->A
-misfire. Read the fusion loop first; leave N as a tunable knob. Then: one clean trial
-re-run (should beat 94.5%), keep BOTH sets for a before/after in Chapter 4.
-After that, in order: fist "leaving" latch (#2), log a PASSIVE row on ACTIVE->PASSIVE
-return (#3). All three are in CHECKLIST.md under "Fixes to do".
+## NEXT STEP
+All three fixes are done + validated. The remaining work is WRITING, not code:
+- Chapter 4: the before/after (94.5% -> A&B 100%, 98% settled) + the T-lag tradeoff.
+- The per-transition camera->LED wall-clock latency table (per-trial `vlm_latency_s`
+  + decide/actuate are logged; still need the transition table).
+- Document the two deliberate behaviours as limitations, not bugs: ~20 s to confirm
+  unoccupied (`EMPTY_SECONDS` hysteresis); bent-over-desk can read A then self-correct.
+If you want a tidier "after" headline, one short clean trial pass (timing now dialed
+in) would land near 98%, but the 77-trial set is honest and usable as-is.
 
 ## Where the results live (for the writing / viva)
-- `trials.csv` - the RO3 accuracy dataset (73 rows, expected/got/correct + latency). COMMITTED.
+- `trials.csv` - the AFTER-fix RO3 dataset (77 rows, +`vlm_latency_s`). COMMITTED.
+- `archive/trials_before_debounce_2026-11-15.csv` - the BEFORE set (73 rows, 94.5%). COMMITTED.
 - `live_log.csv` - every decision, VLM inference, gesture, with latency (master log).
 - `vlm_descriptions.csv` - every VLM frame + its text + latency.
 - `classify_results.csv` - offline labelled set (12/12).

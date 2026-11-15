@@ -6,14 +6,12 @@ import type { SystemState } from "../lib/types";
 // scores it. RO3 wants >=10 trials per response path. The server owns the
 // measurement (trials.csv); this screen only sends the label and shows progress.
 //
-// CAPTURE DELAY: you cannot be lying on the bed (B) or out of the room (C) AND
-// at the keyboard at the same time. So a tap ARMS a countdown; you move into the
-// state; the trial fires at zero, snapshotting the decision then, not at press
-// time. C also needs ~15-20s to clear the room's EMPTY_SECONDS hysteresis, which
-// is why the delay is selectable.
+// The capture COUNTDOWN (arm -> move into position -> fire at zero) lives in App,
+// not here, so it survives switching to the Live tab mid-count. This screen just
+// arms it (onArm) and reflects the pending state.
 
-const TARGET = 10; // RO3: >=10 trials per response path
-const DELAYS = [3, 10, 20] as const;
+export const TARGET = 10; // RO3: >=10 trials per response path
+const DELAYS = [3, 10, 15, 20] as const;
 
 const POSTURES = [
   { id: "A", label: "Active", sub: "sitting", accent: "var(--a)" },
@@ -28,7 +26,7 @@ const GESTURES = [
   { id: "fist", label: "Fist", sub: "all off" },
 ] as const;
 
-const LABELS: Record<string, string> = {
+export const LABELS: Record<string, string> = {
   A: "Active", T: "Transitional", B: "Resting", C: "Unoccupied",
   open_palm: "Open palm", peace: "Peace", fist: "Fist",
 };
@@ -37,12 +35,15 @@ type Summ = { n: number; correct: number; pct: number };
 type TrialRow = { time: string; expected: string; got: string; correct: string; mode: string };
 type Report = { rows: TrialRow[]; n: number; overall: Summ | null; per_path: Record<string, Summ> };
 
-export default function Trials({ state }: { state: SystemState | null }) {
+export default function Trials({ state, delay, setDelay, pending, onArm }: {
+  state: SystemState | null;
+  delay: number;
+  setDelay: (n: number) => void;
+  pending: { expected: string; left: number } | null;
+  onArm: (id: string) => void;
+}) {
   const [report, setReport] = useState<Report | null>(null);
-  const [flash, setFlash] = useState<{ expected: string; got: string; ok: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [delay, setDelay] = useState(10);
-  const [pending, setPending] = useState<{ expected: string; left: number } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -58,43 +59,10 @@ export default function Trials({ state }: { state: SystemState | null }) {
     return () => clearInterval(id);
   }, [refresh]);
 
-  // The actual POST. Fires at the END of the countdown, so it captures the
-  // decision once you are already in the state.
-  const fire = useCallback(async (expected: string) => {
-    setBusy(true);
-    try {
-      const r = await fetch("/trials", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expected }),
-      });
-      const row = await r.json();
-      if (r.ok) setFlash({ expected: row.expected, got: row.got || "-", ok: row.correct === "True" });
-      await refresh();
-    } catch {
-      /* ignore: next poll refreshes */
-    } finally {
-      setBusy(false);
-    }
-  }, [refresh]);
-
-  // Countdown driver: one tick per second, fires at zero.
-  useEffect(() => {
-    if (!pending) return;
-    if (pending.left <= 0) {
-      void fire(pending.expected);
-      setPending(null);
-      return;
-    }
-    const id = setTimeout(() => setPending((p) => (p ? { ...p, left: p.left - 1 } : null)), 1000);
-    return () => clearTimeout(id);
-  }, [pending, fire]);
-
   const undo = useCallback(async () => {
     setBusy(true);
     try {
       await fetch("/trials/last", { method: "DELETE" });
-      setFlash(null);
       await refresh();
     } finally {
       setBusy(false);
@@ -124,37 +92,9 @@ export default function Trials({ state }: { state: SystemState | null }) {
         </div>
         <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>
           Tap what it <b>should</b> be, then move into that state before the countdown ends.
-          The trial is scored at zero, not when you tap.
+          The trial is scored at zero, not when you tap. You can switch to the Live tab while it counts.
         </p>
       </section>
-
-      {/* Countdown overlay: you have already left the keyboard, so it must be big */}
-      {pending && (
-        <section className="card" style={{ textAlign: "center", borderLeft: "6px solid var(--t)" }}>
-          <div className="muted" style={{ fontSize: 13 }}>Recording {LABELS[pending.expected]} in</div>
-          <div style={{ fontSize: 56, fontWeight: 800, color: "var(--t)", lineHeight: 1.1 }}>{pending.left}s</div>
-          <div className="muted" style={{ fontSize: 13 }}>
-            get into position · system reads <b>{liveProfile ? (LABELS[liveProfile] ?? liveProfile) : "..."}</b>
-          </div>
-          <button className="pill" style={{ marginTop: 10, padding: "6px 18px", fontSize: 13 }} onClick={() => setPending(null)}>
-            Cancel
-          </button>
-        </section>
-      )}
-
-      {flash && !pending && (
-        <div
-          className="card"
-          style={{
-            padding: "12px 16px", fontWeight: 600,
-            color: flash.ok ? "var(--green)" : "#c0392b",
-            borderLeft: `5px solid ${flash.ok ? "var(--green)" : "#c0392b"}`,
-          }}
-        >
-          {flash.ok ? "✓ Correct" : "✗ Miss"} — expected {LABELS[flash.expected] ?? flash.expected},
-          system read {LABELS[flash.got] ?? flash.got}
-        </div>
-      )}
 
       {/* Capture delay: C needs ~20s to clear EMPTY_SECONDS; A/T a few seconds */}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -181,7 +121,7 @@ export default function Trials({ state }: { state: SystemState | null }) {
         <div className="grid-4">
           {POSTURES.map((p) => (
             <RecordButton key={p.id} id={p.id} label={p.label} sub={p.sub} accent={p.accent}
-              count={report?.per_path[p.id]?.n ?? 0} disabled={blocked} onClick={(id) => setPending({ expected: id, left: delay })} />
+              count={report?.per_path[p.id]?.n ?? 0} disabled={blocked} onClick={onArm} />
           ))}
         </div>
       </div>
@@ -191,7 +131,7 @@ export default function Trials({ state }: { state: SystemState | null }) {
         <div className="grid-4">
           {GESTURES.map((g) => (
             <RecordButton key={g.id} id={g.id} label={g.label} sub={g.sub} accent="var(--green)"
-              count={report?.per_path[g.id]?.n ?? 0} disabled={blocked} onClick={(id) => setPending({ expected: id, left: delay })} />
+              count={report?.per_path[g.id]?.n ?? 0} disabled={blocked} onClick={onArm} />
           ))}
         </div>
       </div>

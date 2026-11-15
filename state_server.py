@@ -231,7 +231,7 @@ def offline_accuracy(path=EVAL_PATH):
 
 TRIAL_PATHS = ("T", "A", "B", "C", "open_palm", "peace", "fist")
 TRIAL_FIELDS = ["time", "expected", "got", "correct", "mode", "online",
-                "decide_latency_ms", "actuate_latency_ms"]
+                "decide_latency_ms", "actuate_latency_ms", "vlm_latency_s"]
 _trial_lock = threading.Lock()
 
 
@@ -276,6 +276,9 @@ def record_trial(expected):
     row = {"time": _iso(time.time()), "expected": expected, "got": got or "",
            "correct": str(got == expected), "mode": cur.get("mode", ""),
            "online": str(bool(online)),
+           # latency of the decision this trial captured: VLM inference (detection)
+           # + decide compute (decision-making) + serial write (actuation).
+           "vlm_latency_s": cur.get("vlm_latency_s") or "",
            "decide_latency_ms": cur.get("decide_latency_ms") or "",
            "actuate_latency_ms": cur.get("actuate_latency_ms") or ""}
     with _trial_lock:
