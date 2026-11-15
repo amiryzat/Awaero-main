@@ -34,6 +34,7 @@ LOG_PATH = os.path.join(HERE, "live_log.csv")
 EVAL_PATH = os.path.join(HERE, "classify_results.csv")
 FRAME_PATH = os.path.join(HERE, "live_frame.jpg")   # written by live_system.py
 DIST = os.path.join(HERE, "web-dashboard", "dist")  # the built web dashboard (PRD 6.2)
+TRIALS_PATH = os.path.join(HERE, "trials.csv")      # written by the Trials recorder (RO3)
 
 STALE_SECONDS = 30            # newest row older than this -> not online
 SESSION_GAP_SECONDS = 30 * 60  # a gap this long, or time going backwards, splits sessions
@@ -204,7 +205,7 @@ def metrics(rows, window="session", tail=0.0, now=None):
                       "profile": r["profile"],
                       "appliances": {k: r.get(k) == "1" for k in APPLIANCES}}
                      for r, d in zip(sel, durs)],
-        "accuracy": {"live": None, "offline": offline_accuracy()},   # live: Phase 5 trials
+        "accuracy": {"live": live_accuracy(), "offline": offline_accuracy()},   # live: Trials recorder
     }
 
 
@@ -220,6 +221,83 @@ def offline_accuracy(path=EVAL_PATH):
     correct = sum(r.get("correct") == "True" for r in rows)
     return {"n": len(rows), "correct": correct,
             "pct": round(100 * correct / len(rows), 1), "captured_at": _iso(captured)}
+
+
+# ---- trials (RO3 live accuracy) ---------------------------------------------
+# A trial = the human declares the GROUND TRUTH ("I am now sitting -> A") and the
+# server snapshots its own current decision as the MEASURED value. correct is
+# computed, never trusted from the client. One new file (trials.csv); live_log.csv
+# is never touched. RO3 wants >=10 trials per response path.
+
+TRIAL_PATHS = ("T", "A", "B", "C", "open_palm", "peace", "fist")
+TRIAL_FIELDS = ["time", "expected", "got", "correct", "mode", "online",
+                "decide_latency_ms", "actuate_latency_ms"]
+_trial_lock = threading.Lock()
+
+
+def _read_trials(path=TRIALS_PATH):
+    try:
+        with open(path, newline="") as f:
+            return list(csv.DictReader(f))
+    except OSError:
+        return []
+
+
+def _summ(rows):
+    if not rows:
+        return None
+    c = sum(r.get("correct") == "True" for r in rows)
+    return {"n": len(rows), "correct": c, "pct": round(100 * c / len(rows), 1)}
+
+
+def live_accuracy(path=TRIALS_PATH):
+    """Overall + per-profile, for /metrics.accuracy.live (the dashboard card)."""
+    rows = _read_trials(path)
+    if not rows:
+        return None
+    out = _summ(rows)
+    out["per_profile"] = {p: _summ([r for r in rows if r.get("expected") == p]) for p in PROFILES}
+    return out
+
+
+def trials_report(path=TRIALS_PATH):
+    """Rows + per-path counts incl. gestures, for the Trials tab."""
+    rows = _read_trials(path)
+    per = {p: _summ([r for r in rows if r.get("expected") == p]) for p in TRIAL_PATHS}
+    return {"rows": rows[::-1][:50], "n": len(rows),
+            "overall": _summ(rows), "per_path": {k: v for k, v in per.items() if v}}
+
+
+def record_trial(expected):
+    """Snapshot the live decision now and score it against the declared label."""
+    cur = (SRC.state().get("current") or {}) if SRC else {}
+    online = SRC.state().get("online", False) if SRC else False
+    got = cur.get("profile")
+    row = {"time": _iso(time.time()), "expected": expected, "got": got or "",
+           "correct": str(got == expected), "mode": cur.get("mode", ""),
+           "online": str(bool(online)),
+           "decide_latency_ms": cur.get("decide_latency_ms") or "",
+           "actuate_latency_ms": cur.get("actuate_latency_ms") or ""}
+    with _trial_lock:
+        new = not os.path.exists(TRIALS_PATH)
+        with open(TRIALS_PATH, "a", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=TRIAL_FIELDS)
+            if new:
+                w.writeheader()
+            w.writerow(row)
+    return row
+
+
+def delete_last_trial():
+    with _trial_lock:
+        rows = _read_trials()
+        if not rows:
+            return None
+        with open(TRIALS_PATH, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=TRIAL_FIELDS, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(rows[:-1])
+        return rows[-1]
 
 
 # ---- source -----------------------------------------------------------------
@@ -336,6 +414,24 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self._send(204, b"", "text/plain")
 
+    def do_POST(self):
+        if urlparse(self.path).path != "/trials":
+            return self._send(404, {"error": "not found"})
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            expected = str(json.loads(self.rfile.read(n) or b"{}").get("expected", "")).strip()
+        except (ValueError, json.JSONDecodeError):
+            return self._send(400, {"error": "bad json"})
+        if expected not in TRIAL_PATHS:
+            return self._send(400, {"error": "expected must be one of %s" % (TRIAL_PATHS,)})
+        self._send(200, record_trial(expected))
+
+    def do_DELETE(self):
+        if urlparse(self.path).path != "/trials/last":
+            return self._send(404, {"error": "not found"})
+        removed = delete_last_trial()
+        self._send(200 if removed else 404, {"removed": removed})
+
     def do_GET(self):
         url = urlparse(self.path)
         q = parse_qs(url.query)
@@ -351,6 +447,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, [decision(r) for r in dec[::-1][:max(1, limit)]])
         elif url.path == "/metrics":
             self._send(200, SRC.metrics(q.get("window", ["session"])[0]))
+        elif url.path == "/trials":
+            self._send(200, trials_report())
         elif url.path == "/frame.jpg":
             if not frame_fresh():
                 return self._send(404, {"error": "no live frame"})
@@ -513,6 +611,26 @@ def _selftest():
     print("selftest ok")
     _selftest_mixed()
     _selftest_midnight()
+    _selftest_trials()
+
+
+def _selftest_trials():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "trials.csv")
+        with open(p, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=TRIAL_FIELDS)
+            w.writeheader()
+            for exp, got in [("A", "A"), ("A", "A"), ("A", "T"), ("B", "B"), ("C", "C")]:
+                w.writerow({"time": "t", "expected": exp, "got": got,
+                            "correct": str(got == exp), "mode": "PASSIVE", "online": "True",
+                            "decide_latency_ms": "", "actuate_latency_ms": ""})
+        a = live_accuracy(p)
+        assert a["n"] == 5 and a["correct"] == 4 and a["pct"] == 80.0, a
+        assert a["per_profile"]["A"] == {"n": 3, "correct": 2, "pct": 66.7}, a["per_profile"]["A"]
+        assert a["per_profile"]["T"] is None, a["per_profile"]["T"]   # no T trial -> null
+        assert live_accuracy(os.path.join(d, "none.csv")) is None     # no file -> no figure
+    print("selftest trials ok")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import Login from "./ui/Login";
 import Home from "./ui/Home";
 import Live from "./ui/Live";
 import Stats from "./ui/Stats";
+import Trials from "./ui/Trials";
 import { isSignedIn, signOut } from "./lib/session";
 import { useSystem, type Conn, type MetricsWindow } from "./lib/useSystem";
 
@@ -12,7 +13,7 @@ export default function App() {
   return <Dashboard onSignOut={() => { signOut(); setSignedIn(false); }} />;
 }
 
-type Tab = "home" | "live" | "stats";
+type Tab = "home" | "live" | "stats" | "trials";
 
 function Dashboard({ onSignOut }: { onSignOut: () => void }) {
   const [tab, setTab] = useState<Tab>("home");
@@ -39,6 +40,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
           {tab === "home" && <Home state={state} history={history} metrics={metrics} />}
           {tab === "live" && <Live state={state} />}
           {tab === "stats" && <Stats metrics={metrics} window={win} onWindow={setWin} />}
+          {tab === "trials" && <Trials state={state} />}
         </div>
 
         <footer className="muted" style={{ fontSize: 12, textAlign: "center", marginTop: 8 }}>
@@ -55,6 +57,9 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         </button>
         <button className={tab === "stats" ? "active" : ""} onClick={() => setTab("stats")}>
           Stats
+        </button>
+        <button className={tab === "trials" ? "active" : ""} onClick={() => setTab("trials")}>
+          Trials
         </button>
       </nav>
     </>

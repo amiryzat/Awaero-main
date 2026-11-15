@@ -16,7 +16,7 @@ const BUILD_STAMP = `${new Date().toISOString().slice(0, 10)} ${gitSha()}`;
 // The Python server (state_server.py :8000) serves the built dist/, so in
 // production the API is same-origin. The dev proxy maps the same API paths to
 // :8000 so fetch code uses relative paths identically in dev and prod.
-const API = ["/health", "/state", "/history", "/metrics", "/frame.jpg"];
+const API = ["/health", "/state", "/history", "/metrics", "/frame.jpg", "/trials"];
 
 export default defineConfig({
   base: "./", // relative asset paths so dist/ works when served from Python
