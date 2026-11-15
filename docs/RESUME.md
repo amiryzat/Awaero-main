@@ -1,58 +1,77 @@
 # RESUME - where we left off
 
-Newest-state pointer for a new chat. Read this first, then `CONTEXT.md`
-(decisions) and `PROGRESS.md` (build state). Last updated: 2026-11-15.
+Newest-state pointer for a new chat. Read this first, then `CHECKLIST.md`
+(what is built vs not), `CONTEXT.md` (decisions), `PROGRESS.md` (build state).
+Last updated: 2026-11-15 (evening).
 
 ## One-line status
-Cable-connected phone app works. Building a LOCAL web dashboard as the
-can't-fail backup. No cloud. Networking over borrowed WiFi is a dead end
-(explained below), so the cable stays for now.
+Web dashboard + Trials recorder BUILT. First real RO3 run done: **73 trials,
+94.5%**. Three real flaws found in the live run, fixes listed and ranked. Next
+step = build the posture debounce, then one clean re-run.
 
-## What happened this session (2026-11-15)
-- **state_server.py midnight bug FIXED + tested.** The log has no date, so a run
-  crossing 00:00 was split into two sessions and Stats showed a 110 s window
-  with every profile at 0%. `parse_log` now rolls the day without starting a new
-  session; only a real >30 min gap splits. New `_selftest_midnight` case passes
-  (`python state_server.py --selftest`). Same run now reads correctly: 470 s
-  window, profile A 100%, PASSIVE latency present.
-- **Phone-to-Mac wireless: diagnosed, not fixable here.** The friend's WiFi
-  ("Kamaruln73...@unifi", router is an AZ-Tech WR744 at 192.168.0.1, a ZTE F620
-  is just the fibre ONT) has TWO access points sharing one SSID and it isolates
-  clients. The Mac lands on one AP (confirmed: Mac 192.168.0.31 is in the
-  router's ARP table), the phone lands on the other (phone 192.168.0.20 is NOT
-  in the ARP table). Total L2 block both directions even with Relay Blocking
-  (this firmware's name for client isolation) OFF on both bands. A logging probe
-  confirmed the phone's HTTP request never reaches the Mac. It is NOT a code or
-  app bug, and it is not our router to reconfigure.
-- **app-monitor auto-discovery REWRITTEN (installed on the iPhone 17, builds
-  clean).** `src/lib/useSystem.ts` now learns the Mac's lan_ip + Bonjour name
-  from /health, races all known addresses on every reconnect (WiFi IP first,
-  .local second), and re-searches after 3 failed polls, so it survives the DHCP
-  move (.35 -> .31) and recovers itself when the cable is pulled IF the phone can
-  reach the Mac. `src/app/settings.tsx` got a "Wireless check" that says plainly
-  whether the cable is needed. tsc + expo lint clean.
+## What happened this session (2026-11-15, afternoon/evening)
+- **Local web dashboard BUILT (React+Vite "Awaero").** Served by `state_server.py`
+  at `/` from `web-dashboard/dist/` (login gate + Home/Live/Stats/Trials), follows
+  the reference UI, path-traversal guarded, build stamp in the footer. Reachable in
+  the Mac browser AND the phone browser (hit the Mac at 192.168.0.16:8000 from the
+  phone this session). Commits: 6f744bf, c2ee697, cc80676.
+- **Trials recorder BUILT - the RO3 instrument (closes the biggest gap).** You
+  declare the ground truth (what it SHOULD read); the server snapshots its own live
+  decision and scores it (`trials.csv`). A capture countdown (3/10/20s) lets you get
+  into B (lying) / C (leaving) before the trial fires, since you cannot be in the
+  state AND at the keyboard. Endpoints: POST/GET /trials, DELETE /trials/last; live
+  accuracy flows into /metrics -> the Stats accuracy card. Selftest covers the math.
+- **First real run: 73 trials, 94.5%** (T 11/11, A 9/10, B 8/10, C 10/10). All 73
+  recorded online=True (valid). Data in `trials.csv` (now committed).
+- **Live run flaws found (watched via sampled frames + the decision log):**
+  1. VLM flip-flops T<->A on the same desk scene every ~2 s -> light/fan/TV flicker,
+     and a STANDING person read as sitting (A) -> all appliances ON (IMG_0369). Pose
+     was correct (T) there; the VLM is the posture authority and it erred.
+  2. Fist turns all off, but when ACTIVE ends (6 s) PASSIVE re-commits A and powers
+     everything back on - so fist is only a momentary all-off, not a "leaving" latch.
+  3. App froze showing ACTIVE for a 5-min log gap while the LCD correctly showed
+     PASSIVE - the app is decision-triggered, the LCD is frame-triggered.
+  4. Cosmetic: pose phantom box parks on the clothes rail when lying down (VLM still
+     gives B); pose "0 ppl" when an arm is raised. Document for Q&A, no fix.
 
-## Decisions locked
-- **Backup = ONE local web app served by state_server.py at `/`** (login screen
-  + live dashboard reusing /state, /metrics, /history, /frame.jpg). Runs in the
-  Mac's own browser (zero networking, guaranteed) and the phone's browser over
-  the cable. NOT hosted on Vercel: a cloud page cannot reach the Mac's LAN data,
-  and tunnelling the camera to the cloud would contradict RO2's edge/no-cloud
-  claim (a judge could use that against us). A mock-data Vercel build is fine
-  later as a portfolio showcase only.
-- Cable now; for the viva bring ONE network we control (a hotspot or pocket
-  router), join both Mac and phone to it. Demo needs no internet, so speed is
-  irrelevant. The phone app is a monitoring/eval tool, not the graded system
-  (camera -> Mac -> Arduino is the system).
+## Decisions locked (still true)
+- Backup = ONE local web app served by `state_server.py` at `/`. NOT Vercel (a cloud
+  page can't reach the Mac LAN; would contradict RO2 edge/no-cloud). Mock-data Vercel
+  OK later as portfolio only.
+- Cable now; for the viva bring ONE network we control (hotspot / pocket router).
+  Borrowed WiFi isolates clients (two APs share one SSID) - not our router to change.
+- Single-room, single-occupant scope. Keep the scene to one person for clean data.
+- Passive engine = Moondream (default). pose = presence, VLM = posture, profile HELD
+  when no VLM answer. FUSED_APP is authoritative.
 
 ## NEXT STEP (just say "go")
-Build `web/dashboard.html` and add a `/` route to `state_server.py` do_GET
-(serve it as text/html; 404 if missing). Patch point is already located:
-insert a branch before the `/health` branch in `Handler.do_GET`. Server read
-cleanly, do not touch the FYP Python or the native app.
+**Build the posture debounce in `live_system.py`** - require N consistent VLM reads
+before switching profile. One change kills flaw #1's flicker AND the standing->A
+misfire. Read the fusion loop first; leave N as a tunable knob. Then: one clean trial
+re-run (should beat 94.5%), keep BOTH sets for a before/after in Chapter 4.
+After that, in order: fist "leaving" latch (#2), log a PASSIVE row on ACTIVE->PASSIVE
+return (#3). All three are in CHECKLIST.md under "Fixes to do".
+
+## Where the results live (for the writing / viva)
+- `trials.csv` - the RO3 accuracy dataset (73 rows, expected/got/correct + latency). COMMITTED.
+- `live_log.csv` - every decision, VLM inference, gesture, with latency (master log).
+- `vlm_descriptions.csv` - every VLM frame + its text + latency.
+- `classify_results.csv` - offline labelled set (12/12).
+- `snapshots/` (220) + `snapshots/vlm/` (1833) - visual evidence (local, gitignored).
+- The dashboard Stats tab renders activation reduction (~15.6% last window) + accuracy live.
 
 ## Run reminders
-- Server: `source venv/bin/activate && python state_server.py` (prints the Mac
-  address; also reachable as Amirv-Mac.local:8000).
+- Server: `python state_server.py` (prints the Mac address; also Amirv-Mac.local:8000).
+  Serves the dashboard at `/`. `--selftest` checks the math.
 - System: `python live_system.py` (Moondream) / `python live_system.py qwen`.
+- Dashboard: build with `cd web-dashboard && npm run build` (serve dist/, never the
+  dev server). Footer stamp must match HEAD or the dist/ is stale.
+- **Next live test: launch `live_system.py` as a TRACKED background process** so Claude
+  is pinged on exit and can analyze the whole run (it kept dying untracked this session
+  when the Continuity Camera slept). See memory `feedback-live-test-tracked`.
 - Resume this chat if VS Code closes: `claude --continue` (or `claude --resume`).
+
+## LCD note
+`lcd_scroll.py` added (scroll a message across the LCD top line; close live_system.py
+first - one program per display board). LCD random-symbols issue still open; suspect
+power/brown-out, fix = double lcd.init(). LEDs + app are the real actuation, not blocking.

@@ -135,6 +135,12 @@ arduino-cli upload -p /dev/cu.usbmodem1201 --fqbn arduino:avr:uno arduino/power_
   per-appliance 60 s override). Evening: Moondream runner; people-focused prompt
   (lying 1/12 -> 12/12, empty 41/41); VLM-confirmed presence beats pose phantoms;
   leaving -> C in 10-18 s. Full numbers in `EVAL_passive_vlm.md`.
+- **2026-11-15 (eve)**: Local web dashboard "Awaero" BUILT (React+Vite, served by
+  state_server.py at `/`). **Trials recorder BUILT** - the RO3 instrument (declare
+  ground truth, server scores its own live decision, capture countdown for B/C).
+  First real run: **73 trials, 94.5%** (T 11/11, A 9/10, B 8/10, C 10/10) in
+  `trials.csv`. Live-run flaws found + ranked fixes (posture debounce, fist latch,
+  app/LCD mode lag) - see CHECKLIST.md "Fixes to do". `lcd_scroll.py` util added.
 - **2026-11-13**: Integrated entrypoint `live_system.py`; LEDs relabelled per
   appliance; decision logging; Blender room model.
 - **2026-11-12**: Qwen3-VL swap; dataset recaptured from the iPhone 12.
@@ -143,9 +149,12 @@ arduino-cli upload -p /dev/cu.usbmodem1201 --fqbn arduino:avr:uno arduino/power_
 - **2026-11-10**: Arduino LED actuation built and wired (`HANDOFF.md`).
 
 ## Next
-- **Build `web/dashboard.html`** served by state_server.py at `/` (login +
-  live dashboard, local only). The decided backup. Just say go.
-- app-monitor Phase 5 (Trials, the RO3 instrument) when back on it.
-- For the viva: one network we control (hotspot/pocket router), both
-  devices on it; demo needs no internet.
-- RO3 trials and end-to-end response time.
+- **Posture debounce in `live_system.py`** (N consistent VLM reads before switching)
+  - kills the T<->A flicker AND the standing->A misfire. Highest value. Then one
+  clean trial re-run (keep both sets for a before/after in Ch 4).
+- Then: fist "leaving" latch; log a PASSIVE row on ACTIVE->PASSIVE return.
+- End-to-end camera->LED response time table per transition (latency per trial is
+  already captured; needs the wall-clock table).
+- Gesture accuracy table (recorder supports it; gesture trials not yet to 10 each).
+- For the viva: one network we control (hotspot/pocket router), both devices on it.
+- Writing: Chapter 3 (fusion), Chapter 4 (94.5% baseline + improved), Chapter 5.

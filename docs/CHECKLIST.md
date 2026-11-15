@@ -1,4 +1,4 @@
-# FYP Checklist
+3# FYP Checklist
 
 Vision-Based Smart Power Management. What is built vs what is not.
 Last updated: 2026-11-15. Newest live-state pointer: `docs/RESUME.md`.
@@ -56,8 +56,12 @@ Last updated: 2026-11-15. Newest live-state pointer: `docs/RESUME.md`.
       says NO SIGNAL after 10 s of silence; `display_node.py` formats the state
       (`PASSIVE Sitting` / `L:ON F:ON TV:ON`) and `live_system.py` sends it.
       Needs a DATA micro-USB cable (the first cable was power-only)
-- [ ] Run `live_system.py` with BOTH boards plugged in and confirm the screen
-      follows the camera
+- [~] Ran `live_system.py` with BOTH boards (2026-11-15): LEDs + phone app
+      follow correctly, but the **LCD shows RANDOM SYMBOLS**. Ruled out baud
+      (9600 both sides) and wiring/address (I2C scan found exactly 0x27).
+      Reflashed `arduino/display_node` with a fresh init; if still garbled the
+      suspect is power/brown-out (double `lcd.init()` is the fix). Pending Amir's
+      confirmation. Not blocking: LEDs + app are the real actuation
 - [ ] 7-segment display: verified common anode (dot lit) but parked; the LCD
       replaced it (needs 4 wires instead of 8)
 - [ ] LED board GND shortage: all 3 GND holes used; build a ground rail on the
@@ -78,21 +82,65 @@ Last updated: 2026-11-15. Newest live-state pointer: `docs/RESUME.md`.
       LEDs off, which looks the same as "system off")
 - [ ] Relay showpiece - LOW-VOLTAGE load only, never mains
 
-### Dashboard / app (next phase)
-- [ ] App reads `live_log.csv` and shows live profile, appliance states, VLM
-      latency, accuracy (scaffolded in `app-monitor/`; Dr. Zaaba approved it for
-      RO3)
+### Dashboard / app (app-monitor, built through PRD Phase 4)
+- [x] `state_server.py`: stdlib LAN bridge serving /state, /metrics, /history,
+      /frame.jpg from `live_log.csv`; `--replay` fixture; `--selftest` (incl. the
+      2026-11-15 midnight-parse fix). Runs on port 8000
+- [x] app-monitor rebuilt on the real 4-profile model: Home, Live (pipeline +
+      relayed camera feed), Stats (RO3 report), Controls. Installed on the iPhone 17
+- [x] Auto-discovery: the app learns the Mac's IP + Bonjour name, races all known
+      addresses each reconnect, self-recovers; Settings has a "Wireless check"
+- [x] FYP latency instrumentation (`decide_latency_ms`, `actuate_latency_ms`) and
+      the `live_frame.jpg` camera relay are wired into `live_system.py`
+- [x] **Phase 5 Trials - BUILT (2026-11-15).** The RO3 instrument lives in the web
+      dashboard (Trials tab) + `state_server.py` (POST/GET/DELETE /trials, live
+      accuracy in /metrics, `trials.csv`). You declare the ground truth, the server
+      snapshots its own live decision and scores it; a capture countdown lets you
+      get into B (lying) / C (leaving) before the trial fires. First real run:
+      **73 trials, 94.5%** (T 11/11, A 9/10, B 8/10, C 10/10)
+- [x] **Local web dashboard - BUILT (2026-11-15).** React+Vite "Awaero", served at
+      `/` by `state_server.py` from `dist/` (login gate + Home/Live/Stats/Trials),
+      follows the reference UI. Runs in the Mac's browser and the phone browser
+      (reached the Mac at 192.168.0.16:8000 over the phone this session)
+- [ ] Manual override (Controls -> `override.json` -> system), PRD Phase 6-7.
+      Controls tab is still read-only
+
+### Fixes to do (flaws seen in the 2026-11-15 live run, ranked)
+These are the three that actually move appliances wrong; the rest are cosmetic.
+- [ ] **1. Posture debounce (highest value).** The VLM flip-flops T<->A on the same
+      desk scene every ~2 s (18:32-18:34 in `live_log.csv`), flapping the light/
+      fan/TV on and off. Require N consistent VLM reads before switching profile.
+      Kills the flicker AND the standing-read-as-A misfire below. In `live_system.py`
+- [ ] **2. Fist "leaving" latch.** Fist turns all off, but when ACTIVE ends (6 s)
+      PASSIVE re-commits A and powers everything back on. For the "turn off before I
+      leave" intent, latch all-off until the room empties (C) or another gesture.
+      Read the gesture-override hold code first. In `live_system.py`
+- [ ] **3. Log a PASSIVE row on every ACTIVE->PASSIVE return.** The app froze on the
+      last gesture (showed ACTIVE) for a 5-min gap while the LCD correctly showed
+      PASSIVE - the app is decision-triggered, the LCD is frame-triggered. Small fix
+- [ ] Cosmetic (not decision-affecting): pose phantom box parks on the clothes rail
+      when you lie down (VLM still gives the right B); pose "0 ppl" when an arm is
+      raised. Known limitations, document for Q&A, no fix needed
 
 ### Evaluation (RO3)
-- [ ] >=10 trials per response path (>=70 data points); current sets are
-      3/profile labelled + ~70 eye-checked live frames
-- [ ] End-to-end response time per transition (camera -> LED), per mode
-- [ ] Report Simulated Appliance Activation Reduction (exact mandated term)
-- [ ] Gesture accuracy table (3 gestures x >=10 trials)
+- [x] **>=10 trials per response path - DONE (2026-11-15).** 73 trials via the Trials
+      recorder: T 11, A 10, B 10, C 10 + gestures. Overall 94.5%. Data in `trials.csv`.
+      Re-run cleanly once the posture debounce lands (A/B misses were the VLM flaw)
+- [~] End-to-end response time per transition (camera -> LED), per mode: each trial
+      row now carries `decide_latency_ms` + `actuate_latency_ms`; decide ~24 ms p50,
+      actuate ~0.1 ms. Still need the per-transition camera->LED wall-clock table
+- [ ] Report Simulated Appliance Activation Reduction (exact mandated term) - the
+      dashboard shows it live (15.6% last window); pull the final number for Ch 4
+- [ ] Gesture accuracy table (3 gestures x >=10 trials) - recorder supports it;
+      gesture trials not yet to 10 each
 
 ### Demo build
 - [ ] Physical cardboard model house with the LEDs as labelled appliances
 - [ ] LEDs extended off the breadboard on jumper wires (m-f, on order)
+- [ ] Wireless phone<->Mac for the viva: bring ONE network we control (hotspot or
+      pocket router). The borrowed WiFi isolates clients (two APs share one SSID)
+      so the phone cannot reach the Mac on it; the USB cable works meanwhile. Not
+      a code bug, not our router to change (diagnosed 2026-11-15)
 
 ### Writing
 - [ ] Chapter 3: align to the settled fusion and the chosen VLM
