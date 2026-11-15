@@ -24,7 +24,7 @@ export default function Login({ onSignIn }: { onSignIn: () => void }) {
         margin: "0 auto",
       }}
     >
-      <div style={{ fontWeight: 700, color: "var(--green)", letterSpacing: 1, marginBottom: 24 }}>
+      <div style={{ fontWeight: 700, color: "var(--navy)", letterSpacing: 1, marginBottom: 24 }}>
         AWAERO
       </div>
       <h1 style={{ fontSize: 34, lineHeight: 1.15, marginBottom: 14 }}>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Metrics, Profile, Stat } from "../lib/types";
 import type { MetricsWindow } from "../lib/useSystem";
+import RubberSegment from "./RubberSegment";
 
 // How long the meters take to fill, and the scrambling numbers to settle.
 const LOAD_MS = 950;
@@ -28,76 +29,6 @@ const PROFILE_META: Record<Profile, { label: string; accent: string }> = {
 
 const WINDOWS: MetricsWindow[] = ["session", "today", "all"];
 
-// Rubber segmented control: the active thumb's two edges move with a slight lag
-// so it stretches across the gap then settles, the "rubber band" feel from React
-// Bits' RubberSegment, built here with no motion-library dependency.
-function RubberSegment<T extends string>({
-  options,
-  value,
-  onChange,
-}: {
-  options: readonly T[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const btns = useRef<(HTMLButtonElement | null)[]>([]);
-  const activeIdx = Math.max(0, options.indexOf(value));
-  const prev = useRef(activeIdx);
-  const [geo, setGeo] = useState<{ left: number; right: number } | null>(null);
-  const calm = reduceMotion();
-
-  useEffect(() => {
-    const measure = () => {
-      const c = ref.current;
-      const b = btns.current[activeIdx];
-      if (!c || !b) return;
-      setGeo({ left: b.offsetLeft, right: c.clientWidth - (b.offsetLeft + b.offsetWidth) });
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (ref.current) ro.observe(ref.current);
-    return () => ro.disconnect();
-  }, [activeIdx, options.length]);
-
-  const dir = activeIdx - prev.current;
-  useEffect(() => { prev.current = activeIdx; });
-
-  // The trailing edge lags the leading edge, so the thumb stretches then squashes.
-  const dur = 380, lead = 95, ease = "cubic-bezier(.5,.05,.25,1)";
-  const thumbStyle: React.CSSProperties = geo
-    ? {
-        position: "absolute", top: 3, bottom: 3, left: geo.left, right: geo.right,
-        background: "var(--card)", borderRadius: 8, boxShadow: "var(--shadow)",
-        transition: calm
-          ? "none"
-          : `left ${dur}ms ${ease} ${dir > 0 ? lead : 0}ms, right ${dur}ms ${ease} ${dir < 0 ? lead : 0}ms`,
-      }
-    : { display: "none" };
-
-  return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex", background: "var(--bg)", borderRadius: 11, padding: 3 }}>
-      <div style={thumbStyle} aria-hidden />
-      {options.map((o, i) => (
-        <button
-          key={o}
-          ref={(el) => { btns.current[i] = el; }}
-          onClick={() => onChange(o)}
-          style={{
-            position: "relative", zIndex: 1, border: "none", background: "transparent",
-            cursor: "pointer", fontSize: 13, fontWeight: 600, textTransform: "capitalize",
-            padding: "7px 16px", borderRadius: 8, fontFamily: "inherit",
-            color: i === activeIdx ? "var(--navy)" : "var(--slate)",
-            transition: "color 220ms var(--ease-out)",
-          }}
-        >
-          {o}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 export default function Stats({
   metrics,
   window: win,
@@ -111,7 +42,12 @@ export default function Stats({
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
         <h1 style={{ fontSize: 26 }}>Evaluation</h1>
-        <RubberSegment options={WINDOWS} value={win} onChange={onWindow} />
+        <RubberSegment
+          options={WINDOWS}
+          value={win}
+          onChange={onWindow}
+          containerStyle={{ position: "relative", background: "#e9e9ec", borderRadius: 11, padding: 3 }}
+        />
       </div>
 
       {metrics ? (
@@ -247,7 +183,7 @@ function AccuracyByPathCard() {
         </div>
       ) : (
         <>
-          <div style={{ ...big, color: "var(--green)", marginTop: 6 }}>
+          <div style={{ ...big, marginTop: 6 }}>
             <AnimatedNumber value={data.overall.pct} suffix="%" />
             <span className="muted" style={{ fontSize: 14, fontWeight: 600, marginLeft: 8 }}>
               overall · n={data.overall.n}
@@ -464,7 +400,7 @@ function ActivationCard({ metrics }: { metrics: Metrics }) {
       </p>
       {a ? (
         <>
-          <div style={{ ...big, color: "var(--green)", marginTop: 8 }}>
+          <div style={{ ...big, marginTop: 8 }}>
             <AnimatedNumber value={a.reduction_pct} suffix="%" />
           </div>
           <div style={{ marginTop: 14 }}>

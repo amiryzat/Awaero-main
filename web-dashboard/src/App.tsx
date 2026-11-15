@@ -4,6 +4,7 @@ import Home from "./ui/Home";
 import Live from "./ui/Live";
 import Stats from "./ui/Stats";
 import Trials, { LABELS } from "./ui/Trials";
+import RubberSegment from "./ui/RubberSegment";
 import { isSignedIn, signOut } from "./lib/session";
 import { useSystem, type Conn, type MetricsWindow } from "./lib/useSystem";
 import type { SystemState } from "./lib/types";
@@ -20,6 +21,7 @@ type Tab = "home" | "live" | "stats" | "trials";
 const svg = {
   width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
   strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const,
+  "aria-hidden": true, focusable: false,
 };
 const HomeIcon = () => (<svg {...svg}><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /></svg>);
 const LiveIcon = () => (<svg {...svg}><rect x="3" y="6" width="13" height="12" rx="2" /><path d="M16 10l5-3v10l-5-3" /></svg>);
@@ -152,11 +154,18 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       <CaptureBanner pending={pending} flash={flash} state={state} onCancel={() => setPending(null)} />
 
       <nav className="tabbar">
-        {NAV.map((n) => (
-          <button key={n.id} className={tab === n.id ? "active" : ""} onClick={() => setTab(n.id)}>
-            {n.label}
-          </button>
-        ))}
+        <RubberSegment
+          options={NAV.map((n) => n.id)}
+          value={tab}
+          onChange={setTab}
+          label={(id) => NAV.find((n) => n.id === id)?.label ?? id}
+          thumb="var(--primary)"
+          thumbShadow="0 1px 4px rgba(0,0,0,0.22)"
+          activeText="#fafafa"
+          inactiveText="var(--slate)"
+          itemStyle={{ padding: "10px 22px", fontSize: 14 }}
+          containerStyle={{ position: "relative", display: "flex", gap: 4 }}
+        />
       </nav>
     </>
   );
@@ -225,6 +234,7 @@ function CaptureBanner({ pending, flash, state, onCancel }: {
 }
 
 function ConnLine({ conn, online, stale }: { conn: Conn; online?: boolean; stale?: number }) {
+  const live = conn === "live" && online;
   const text =
     conn === "connecting"
       ? "Connecting to the system..."
@@ -233,10 +243,17 @@ function ConnLine({ conn, online, stale }: { conn: Conn; online?: boolean; stale
         : online
           ? "Live"
           : `System not running (last update ${stale ?? "?"}s ago)`;
-  const color = conn === "live" && online ? "var(--green)" : conn === "down" ? "#c0392b" : "var(--slate)";
+  const color = live ? "var(--green)" : conn === "down" ? "#c0392b" : "var(--slate)";
+  const bg = live ? "var(--green-soft)" : conn === "down" ? "#fdecea" : "#eef1f4";
   return (
-    <div style={{ fontSize: 13, fontWeight: 600, color }}>
-      <span style={{ marginRight: 6 }}>●</span>
+    <div
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 7,
+        fontSize: 13, fontWeight: 600, color, background: bg,
+        padding: "5px 12px", borderRadius: 999, width: "fit-content",
+      }}
+    >
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "currentColor", flexShrink: 0 }} />
       {text}
     </div>
   );
