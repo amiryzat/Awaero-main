@@ -37,7 +37,7 @@ export default function Live({ state }: { state: SystemState | null }) {
       {gate && (
         <div
           className="card"
-          style={{ borderLeft: "6px solid var(--t)", fontSize: 14, fontWeight: 600, color: "var(--navy)" }}
+          style={{ fontSize: 14, fontWeight: 600, color: "var(--navy)" }}
         >
           Presence gate active: pose authoritative. The VLM and pose disagreed, so
           pose decided presence and the VLM posture was overridden.

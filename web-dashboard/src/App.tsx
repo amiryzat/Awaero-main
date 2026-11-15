@@ -141,7 +141,7 @@ function CaptureBanner({ pending, flash, state, onCancel }: {
       <div style={wrap}>
         <div className="card" style={{
           display: "flex", alignItems: "center", gap: 14, padding: "12px 16px",
-          borderLeft: "6px solid var(--t)", boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
+          boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
         }}>
           <div style={{ fontSize: 38, fontWeight: 800, color: "var(--t)", lineHeight: 1, minWidth: 54 }}>
             {pending.left}s

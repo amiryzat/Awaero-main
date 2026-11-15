@@ -93,7 +93,6 @@ function Hero({ state }: { state: SystemState | null }) {
         display: "flex",
         alignItems: "center",
         gap: 20,
-        borderLeft: `6px solid ${isProfile ? meta.accent : "var(--green)"}`,
       }}
     >
       <div
