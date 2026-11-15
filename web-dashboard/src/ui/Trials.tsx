@@ -200,10 +200,13 @@ function RecordButton({ id, label, sub, accent, count, disabled, onClick }: {
       disabled={disabled}
       style={{
         padding: 14, textAlign: "left", cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.5 : 1, borderLeft: `5px solid ${accent}`, font: "inherit",
+        opacity: disabled ? 0.5 : 1, font: "inherit",
       }}
     >
-      <div style={{ fontWeight: 700, color: "var(--navy)" }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ width: 10, height: 10, borderRadius: "50%", background: accent, display: "inline-block", flexShrink: 0 }} />
+        <span style={{ fontWeight: 700, color: "var(--navy)" }}>{label}</span>
+      </div>
       <div className="muted" style={{ fontSize: 12 }}>{sub}</div>
       <div style={{ fontSize: 12, marginTop: 8, fontWeight: 600, color: done ? "var(--green)" : "var(--slate)" }}>
         {done ? `✓ ${count}` : `${count}/${TARGET}`}
