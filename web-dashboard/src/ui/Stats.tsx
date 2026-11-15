@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Metrics, Profile, Stat } from "../lib/types";
 import type { MetricsWindow } from "../lib/useSystem";
 
@@ -70,7 +71,8 @@ export default function Stats({
           <div className="muted" style={{ fontSize: 13 }}>
             Window: {secs(metrics.window.seconds)} of data.
           </div>
-          <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(min(420px, 100%), 1fr))", alignItems: "start" }}>
+          <div className="stats-grid">
+            <TimelineCard metrics={metrics} />
             <AccuracyCard metrics={metrics} />
             <LatencyCard metrics={metrics} />
             <ActivationCard metrics={metrics} />
@@ -86,6 +88,70 @@ export default function Stats({
         </div>
       )}
     </div>
+  );
+}
+
+// Session timeline: one block per decision, width proportional to how long that
+// profile held, colored by the locked profile palette. Reveals left-to-right on
+// mount (every tab open), like a playback of the session. All from real rows.
+function TimelineCard({ metrics }: { metrics: Metrics }) {
+  const items = metrics.timeline.filter((t) => t.seconds > 0);
+  const total = items.reduce((s, t) => s + t.seconds, 0);
+  const [revealed, setRevealed] = useState(reduceMotion());
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setRevealed(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  const color = (p: string) => (p in PROFILE_META ? PROFILE_META[p as Profile].accent : "var(--green)");
+  const name = (p: string) => (p in PROFILE_META ? PROFILE_META[p as Profile].label : p);
+
+  return (
+    <section className="card" style={{ gridColumn: "1 / -1" }}>
+      <h3 style={{ fontSize: 16 }}>Session timeline</h3>
+      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+        Each block is one decision; its width is how long that state held. {secs(total)} total.
+      </p>
+
+      {items.length === 0 || total === 0 ? (
+        <div className="muted" style={{ fontSize: 14, marginTop: 10 }}>Not enough data yet.</div>
+      ) : (
+        <>
+          <div
+            style={{
+              marginTop: 14,
+              height: 34,
+              borderRadius: 10,
+              overflow: "hidden",
+              display: "flex",
+              clipPath: revealed ? "inset(0 0 0 0)" : "inset(0 100% 0 0)",
+              transition: "clip-path 1100ms var(--ease-out)",
+            }}
+          >
+            {items.map((t, i) => (
+              <div
+                key={i}
+                title={`${name(t.profile)} · ${secs(t.seconds)} · ${t.at.slice(11, 16)}`}
+                style={{ width: `${(t.seconds / total) * 100}%`, background: color(t.profile), minWidth: 1 }}
+              />
+            ))}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+            <span className="muted" style={{ fontSize: 11 }}>{items[0].at.slice(11, 16)}</span>
+            <span className="muted" style={{ fontSize: 11 }}>{items[items.length - 1].at.slice(11, 16)}</span>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 10 }}>
+            {(["A", "T", "B", "C"] as Profile[]).map((p) => (
+              <span key={p} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: PROFILE_META[p].accent }} />
+                <span className="muted">{PROFILE_META[p].label}</span>
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -164,21 +230,23 @@ function LatencyCard({ metrics }: { metrics: Metrics }) {
 
       {open && (
         <InsightModal title="Response latency, explained" onClose={() => setOpen(false)}>
-          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-            These are the stages between seeing a frame and switching an appliance.
-            <br /><b>p50</b> is typical (median), <b>p95</b> is near the worst case, <b>n</b> is how many were measured.
+          <p className="muted" style={{ fontSize: 14, lineHeight: 1.55, margin: "0 0 3px" }}>
+            The stages between seeing a camera frame and switching an appliance.
+          </p>
+          <p className="muted" style={{ fontSize: 12, lineHeight: 1.5, margin: 0 }}>
+            <b>p50</b> typical (median) · <b>p95</b> near worst case · <b>n</b> samples measured
           </p>
           {rows.map((r) => (
-            <div key={r.label} style={{ padding: "12px 0", borderTop: "1px solid #eef1f4" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10 }}>
-                <span style={{ fontWeight: 700 }}>{r.label}</span>
-                <span style={{ fontWeight: 800, color: "var(--navy)" }}>
-                  {r.stat ? <>{r.stat.mean}<span style={{ fontSize: 12, fontWeight: 600 }}> {r.unit} mean</span></> : "—"}
+            <div key={r.label} style={{ padding: "16px 0", borderTop: "1px solid #eef1f4", marginTop: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+                <span style={{ fontWeight: 700, fontSize: 15, color: "var(--navy)" }}>{r.label}</span>
+                <span style={{ fontWeight: 800, fontSize: 16, color: "var(--navy)", whiteSpace: "nowrap" }}>
+                  {r.stat ? <>{r.stat.mean}<span className="muted" style={{ fontSize: 12, fontWeight: 600 }}> {r.unit}</span></> : "-"}
                 </span>
               </div>
-              <p className="muted" style={{ fontSize: 13, margin: "4px 0 0" }}>{r.why}</p>
+              <p className="muted" style={{ fontSize: 13, lineHeight: 1.55, margin: "6px 0 0" }}>{r.why}</p>
               {r.stat && (
-                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                <div className="muted" style={{ fontSize: 12, marginTop: 8, fontVariantNumeric: "tabular-nums" }}>
                   p50 {r.stat.p50}{r.unit} · p95 {r.stat.p95}{r.unit} · n={r.stat.n}
                 </div>
               )}
@@ -216,31 +284,34 @@ function InsightModal({ title, onClose, children }: {
     return () => window.removeEventListener("keydown", onKey);
   }, [close]);
 
-  return (
+  // Portaled to <body> so position:fixed covers the whole viewport (sidebar
+  // included), not just the card's layout box. Blur only, no dark tint.
+  return createPortal(
     <div onClick={close} style={{
       position: "fixed", inset: 0, zIndex: 100,
-      background: "rgba(18,28,48,0.18)",
-      backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: 14,
+      background: "transparent",
+      backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
       opacity: calm || show ? 1 : 0,
       transition: "opacity 180ms var(--ease-out, ease)",
     }}>
       <div onClick={(e) => e.stopPropagation()} className="card" style={{
-        width: "100%", maxWidth: 520, maxHeight: "82vh", overflow: "auto",
-        boxShadow: "0 12px 40px rgba(0,0,0,0.22)",
+        width: "100%", maxWidth: 460, maxHeight: "82vh", overflow: "auto", padding: 24,
+        boxShadow: "0 16px 48px rgba(18,28,48,0.20)",
         transformOrigin: "center",
         transform: calm || show ? "scale(1)" : "scale(0.92)",
         opacity: calm || show ? 1 : 0,
         transition: "transform 200ms cubic-bezier(.2,.8,.25,1), opacity 170ms var(--ease-out, ease)",
       }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-          <h3 style={{ fontSize: 17 }}>{title}</h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <h3 style={{ fontSize: 18 }}>{title}</h3>
           <button className="pill" onClick={close} aria-label="Close"
             style={{ padding: "4px 12px", fontSize: 16, lineHeight: 1 }}>×</button>
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

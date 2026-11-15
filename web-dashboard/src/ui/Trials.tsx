@@ -97,7 +97,7 @@ export default function Trials({ state, delay, setDelay, pending, onArm }: {
       </section>
 
       {/* Capture delay: C needs ~20s to clear EMPTY_SECONDS; A/T a few seconds */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <span className="muted" style={{ fontSize: 13 }}>Capture delay</span>
         {DELAYS.map((d) => (
           <button

@@ -18,3 +18,8 @@ archive/
 snapshots/
 live_frame.jpg
 trials.csv
+
+# Local agent/skill tooling (boardui, emilkowalski skills) - not part of the FYP
+.agents/
+.claude/
+skills-lock.json

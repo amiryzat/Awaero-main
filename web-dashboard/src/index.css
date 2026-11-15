@@ -58,6 +58,11 @@ h3 {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 18px;
+  /* Strip native button chrome so a <button class="card"> (Trials record and
+     delay buttons) looks identical to a <div class="card"> everywhere else. */
+  border: none;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .pill {
@@ -239,4 +244,90 @@ h3 {
   text-transform: uppercase;
   letter-spacing: 0.6px;
   margin: 6px 2px 2px;
+}
+
+/* ---- Web sidebar + desktop layout (>=900px). Phone keeps topbar + tab bar. ---- */
+.sidebar {
+  display: none; /* shown only on web, below */
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--slate);
+  font: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    background 160ms var(--ease-out),
+    color 160ms var(--ease-out);
+}
+
+.sidebar-item svg {
+  flex-shrink: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sidebar-item:not(.active):hover {
+    background: var(--bg);
+    color: var(--navy);
+  }
+}
+
+.sidebar-item.active {
+  background: var(--green);
+  color: #fff;
+}
+
+@media (min-width: 900px) {
+  .topbar,
+  .tabbar {
+    display: none; /* replaced by the sidebar */
+  }
+
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 232px;
+    padding: 24px 16px;
+    background: var(--card);
+    box-shadow: 2px 0 16px rgba(30, 58, 95, 0.06);
+    z-index: 30;
+  }
+
+  .main {
+    margin-left: 232px;
+  }
+
+  /* Use the width instead of a narrow centered column. */
+  .container {
+    max-width: 1600px;
+    padding: 32px 40px;
+    padding-bottom: 40px; /* no bottom tab bar to clear on web */
+  }
+}
+
+/* Stats cards: tidy 2-column grid (equal-height rows) instead of a ragged
+   auto-fit that stranded a lone card. One column on phones. */
+.stats-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 760px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }

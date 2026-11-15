@@ -102,16 +102,19 @@ function CameraFeed() {
   }, []);
 
   return (
+    // Capped to a phone-sized preview so it is not huge on web. The frame shows
+    // at its own aspect ratio (no cover crop), so it matches the real camera
+    // output instead of being stretched to fill a 4:3 box.
     <div
       className="card"
       style={{
+        maxWidth: 480,
         padding: 0,
         overflow: "hidden",
-        aspectRatio: "4 / 3",
-        position: "relative",
         background: "#11161c",
         display: "grid",
         placeItems: "center",
+        aspectRatio: ok ? undefined : "4 / 3", // reserve space only for the offline card
       }}
     >
       <img
@@ -119,7 +122,7 @@ function CameraFeed() {
         onLoad={() => setOk(true)}
         onError={() => setOk(false)}
         alt="Live camera frame"
-        style={{ width: "100%", height: "100%", objectFit: "cover", display: ok ? "block" : "none" }}
+        style={{ width: "100%", height: "auto", display: ok ? "block" : "none" }}
       />
       {!ok && (
         <div style={{ textAlign: "center", color: "#8a94a6" }}>
