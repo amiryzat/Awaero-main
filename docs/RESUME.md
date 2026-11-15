@@ -2,7 +2,7 @@
 
 Newest-state pointer for a new chat. Read this first, then `CHECKLIST.md`
 (what is built vs not), `CONTEXT.md` (decisions), `PROGRESS.md` (build state).
-Last updated: 2026-11-15 (late).
+Last updated: 2026-11-15 (night, after the web-dashboard UI session).
 
 ## One-line status
 Dashboard + Trials recorder BUILT. The three live-run fixes are BUILT and
@@ -10,6 +10,34 @@ VALIDATED in a second run. **Before: 73 trials, 94.5%. After: 77 trials, 89.6%
 raw -> A & B both now 100% (were 90/80), and 98.0% (50/51) once operator timing
 settled.** The before/after is the Chapter 4 story. Next = writing + the
 per-transition latency table.
+
+## What happened NIGHT (2026-11-15, web-dashboard UI session)
+The dashboard got a full UI pass. No FYP Python changed in this session, only
+`web-dashboard/` (spec `web-dashboard/PRD.md`, Section 11 lists every departure).
+- **Web-first layout**: at >=900px a fixed left sidebar with icons (Home / Live /
+  Stats / Trials, Sign out at the bottom) and a wide content area. Below 900px the
+  topbar plus floating bottom tab bar, now a rubber (stretch then settle) segmented
+  control. Resizing the window flips between them.
+- **Live**: camera preview at the frame's native aspect, capped at 480px (was a
+  cropped 4:3 box).
+- **Stats**: 2 column grid; new Session timeline strip and Accuracy by response
+  path bars (both animate on load, real data); the latency "Explain" modal is
+  blur-only over the whole viewport; rubber Session/Today/All selector.
+- **Trials**: button-cards match the div-cards; mobile overflow fixed (the capture
+  delay row wraps).
+- **Restyle to `DESIGN.md`** (hybrid): monochrome shadcn-style chrome, with profile
+  and status colours kept so it stays readable as a monitor. Cards are borderless
+  with a soft shadow (owner preference). System font, not Geist (a CDN font would
+  break the no-cloud claim).
+- **Decisions**: no new runtime dependencies. BoardUI, React Bits RubberSegment and
+  a 21st.dev ChartLine were reviewed and rebuilt by hand (they need Tailwind,
+  shadcn or `motion`). The Taste Skill is a landing-page tool and was not applied
+  to the dashboard. Dev tooling (Emil Kowalski skills, taste-skill, BoardUI MCP)
+  lives in gitignored `.agents/` and `.claude/`.
+- **Open / unverified**: (1) per-path accuracy shows on both Stats and Trials, the
+  owner has not chosen which tab owns it; (2) the final restyle was not reviewed
+  again after the last tweak; (3) the Live tab with a fresh real camera frame was
+  not re-checked this session (replay always shows "Camera feed offline").
 
 ## What happened LATE (2026-11-15, the fixes + validation)
 - **Three fixes built + validated** (all confirmed in `live_log.csv`):

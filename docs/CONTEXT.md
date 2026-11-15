@@ -24,7 +24,9 @@ the open questions. Evidence for every number is in `EVAL_passive_vlm.md`.
   phone-to-Mac is a dead end on the borrowed WiFi** (two APs share one
   SSID and isolate clients; not our router, not a code bug), so the cable
   stays for now. **Backup decided: one LOCAL web app served by
-  state_server.py at `/`** (login + dashboard), no cloud, no Vercel.
+  state_server.py at `/`** (login + dashboard), no cloud, no Vercel. **Now BUILT**
+  ("Awaero": Home, Live, Stats, Trials; styled per `DESIGN.md`; departures from
+  its spec are in `web-dashboard/PRD.md` Section 11).
   state_server.py midnight log-parsing bug fixed + tested. Full handoff
   in `docs/RESUME.md`.
 - `live_system.py` runs the whole pipeline end to end on the iPhone 12 +
@@ -69,12 +71,13 @@ evaluated alternative in Chapter 4.
 - Present VLM limitations honestly with the measured mitigations.
 
 ## Remaining work
-- **Next: the app/dashboard** (scaffolded in `app-monitor/`): live profile,
-  appliance states, VLM latency, accuracy, from the CSV log.
+- **Dashboard + RO3 trials: built.** >=10 live trials on every posture and gesture
+  path. Before the posture fixes 94.5% (n=73); after, 89.6% raw (n=77) and 98.0%
+  once operator timing settled. Still open here: the per-transition camera->LED
+  latency table and the final Simulated Appliance Activation Reduction figure.
 - Chapter 3 alignment to the settled fusion (draft in `VLM_vs_Pose.md`).
-- RO3: >=10 trials per response path (>=70 points), end-to-end camera->LED
-  response time per transition, gesture accuracy table, Simulated Appliance
-  Activation Reduction. (Mandated term; "energy saving performance" and
+- RO3 still open: end-to-end camera->LED response time per transition, and the
+  final Simulated Appliance Activation Reduction figure. (Mandated term; "energy saving performance" and
   "Simulated Energy Reduction" are banned.)
 - Physical model house; 4th appliance + presence status LED when wires arrive.
 - Chapters 4 and 5.
@@ -94,6 +97,8 @@ evaluated alternative in Chapter 4.
   `live_passive.py` (pose engine), `live_active.py` (gesture engine),
   `classify_passive.py` (Qwen prompts + offline evaluator), `camera.py`
   (pinned index + probe), `serial_actuator.py`, `arduino/power_leds`.
+- `state_server.py` (JSON API, Trials, serves the dashboard), `web-dashboard/`
+  (React + Vite "Awaero"; spec `web-dashboard/PRD.md`).
 - Docs: `PROGRESS.md` (build detail), `CHECKLIST.md` (done vs not),
   `EVAL_passive_vlm.md` (all measurements), `VLM_vs_Pose.md` (thesis framing),
   `HANDOFF.md` (historical hardware handoff).

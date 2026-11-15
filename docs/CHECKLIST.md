@@ -1,4 +1,4 @@
-3# FYP Checklist
+# FYP Checklist
 
 Vision-Based Smart Power Management. What is built vs what is not.
 Last updated: 2026-11-15. Newest live-state pointer: `docs/RESUME.md`.
@@ -102,6 +102,12 @@ Last updated: 2026-11-15. Newest live-state pointer: `docs/RESUME.md`.
       `/` by `state_server.py` from `dist/` (login gate + Home/Live/Stats/Trials),
       follows the reference UI. Runs in the Mac's browser and the phone browser
       (reached the Mac at 192.168.0.16:8000 over the phone this session)
+- [x] **Dashboard UI pass (2026-11-15 night).** Web-first sidebar layout, rubber
+      mobile nav, Stats Session timeline + Accuracy by response path, hybrid
+      restyle to `DESIGN.md` (monochrome chrome, profile/status colours kept),
+      borderless soft-shadow cards. No new runtime dependencies. Departures from the
+      spec: `web-dashboard/PRD.md` Section 11
+- [ ] Decide which tab owns per-path accuracy (it shows on both Stats and Trials)
 - [ ] Manual override (Controls -> `override.json` -> system), PRD Phase 6-7.
       Controls tab is still read-only
 

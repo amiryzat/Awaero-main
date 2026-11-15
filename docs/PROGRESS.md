@@ -1,6 +1,6 @@
 # FYP Progress - Vision-Based Smart Power Management
 
-Last updated: 2026-11-14
+Last updated: 2026-11-15 (night)
 
 ## Status: working end to end, live-tested on the iPhone 12 + Arduino
 
@@ -73,6 +73,12 @@ evaluated alternative.
 - `camera.py` - pinned index; `python camera.py probe` saves one frame per index.
 - `serial_actuator.py`, `arduino/power_leds` - actuation.
 - `blender/room_model.py` - 3D room model.
+- `state_server.py` - stdlib bridge: JSON API (`/state`, `/history`, `/metrics`,
+  `/frame.jpg`), the Trials endpoints (`/trials`, writes `trials.csv`), and it
+  serves the built dashboard at `/`. `python state_server.py --selftest`.
+- `web-dashboard/` - React + Vite "Awaero" (Home, Live, Stats, Trials). Spec and
+  as-built departures: `web-dashboard/PRD.md`. Style source: `DESIGN.md`.
+  Build with `npm run build`; the server serves `dist/`, never the dev server.
 - `archive/` - logs and frames of every test run (evidence for Chapter 4).
 
 ## Known limitations (be ready for Q&A)
@@ -112,6 +118,16 @@ arduino-cli upload -p /dev/cu.usbmodem1201 --fqbn arduino:avr:uno arduino/power_
   ("Amvx") excluded.
 
 ## Session log
+- **2026-11-15 (night)**: web-dashboard UI session, `web-dashboard/` only (no FYP
+  Python changed). Web-first layout (>=900px left sidebar with icons; below that
+  the topbar + rubber bottom tab bar). Live camera preview at native aspect.
+  Stats: 2 column grid, Session timeline strip, Accuracy by response path bars,
+  blur-only latency Explain modal, rubber window selector. Trials: card
+  consistency + mobile overflow fix. Hybrid restyle to `DESIGN.md` (monochrome
+  chrome, profile/status colours kept, borderless soft-shadow cards). No new
+  runtime dependencies (BoardUI, React Bits and a 21st.dev chart were rebuilt by
+  hand). Open: per-path accuracy is on both Stats and Trials. See `docs/RESUME.md`
+  and `web-dashboard/PRD.md` Section 11.
 - **2026-11-15**: app-monitor + networking day. Fixed state_server.py
   midnight log-parsing bug (a run crossing 00:00 split into two sessions,
   Stats showed a 110 s window at 0%); `parse_log` now rolls the day without

@@ -3,6 +3,10 @@
 Single source of truth for building `web-dashboard/`. Written 2026-11-15 against
 the real code in `~/fyp-prototype/`. This folder has its own Claude Code session.
 
+**Status (2026-11-15): v1 is built.** Section 11 lists where the build departs
+from this spec (a Trials tab, web-first layout, a restyle). Where they disagree,
+the code wins and Section 11 is the correction.
+
 **Precedence.** This document does not outrank the running Python. If this
 document and `live_system.py` or `state_server.py` disagree, the code wins and
 this document gets corrected. The three project objectives outrank everything,
@@ -76,7 +80,8 @@ Verbatim from the thesis, section 1.3:
 **This dashboard does not collect new evidence.** It presents what
 `state_server.py` computes. The Trials instrument that will close the RO3
 accuracy gap lives in `../app-monitor` (its PRD Phase 5). If Trials data later
-appears in `/metrics`, this dashboard renders it. Do not duplicate Trials here.
+appears in `/metrics`, this dashboard renders it. (As built, the Trials recorder
+itself was built in this dashboard; see Section 11.)
 
 ---
 
@@ -128,7 +133,7 @@ not present a people count above 1 as if the profile describes all of them.
 
 Three rules that keep this safe:
 
-1. **The dashboard is read-only in v1.** It never writes `live_log.csv`, never
+1. **The dashboard is read-only in v1, except the Trials recorder (Section 11).** It never writes `live_log.csv`, never
    opens the serial port, never commands appliances. Controls come later and
    only through the decision layer (`override.json`), never direct to serial.
 2. **Same origin.** Because the Python server serves the built files, the API
@@ -308,11 +313,11 @@ appear. The camera feed correctly shows "offline" on replay.
 
 ## 7. Screens
 
-Three routes in v1. Phone-width first (the Mac browser window can be narrow,
-and the phone may use this over the cable), scaling up cleanly to a laptop
-screen for the viva.
+Four routes as built (Home, Live, Stats, Trials). The original intent was
+phone-width first; the owner switched it to web-first (Section 11). It still
+collapses cleanly to phone width for the phone over the cable.
 
-### 7.-1 Visual language (LOCKED, follow the reference)
+### 7.-1 Visual language (originally LOCKED to the reference; superseded in part, see Section 11)
 
 The design is `design/reference-smarthome.png`. Match it closely. It is a clean
 light smart-home app, and it maps onto this system almost one to one, which is
@@ -454,12 +459,63 @@ Phases 1 to 5 need no hardware. Verify everything against the replay fixture.
 
 ## 10. Open questions for the owner
 
-1. **Product name.** The login screen and header need one. Not "app-monitor".
+1. ~~Product name.~~ **RESOLVED: Awaero.**
 2. ~~Visual direction~~ **RESOLVED.** Follow `design/reference-smarthome.png`,
    specified in Section 7.-1: light theme, primary green, navy headings, white
    rounded cards, with the four FYP profile accents kept for the state cards.
 3. **Does this replace the phone app in the viva, or sit beside it?** Changes
    how hard Phase 6 pushes on full-screen presentation.
-4. **Controls and Trials in v2?** Controls needs the `override.json` path wired
+4. **Controls in v2?** (Trials was built in v1, see Section 11.) Controls needs the `override.json` path wired
    into `live_system.py` first (app-monitor PRD 4.3a), which is a change to the
    FYP Python and currently out of scope here.
+
+---
+
+## 11. As built (2026-11-15), and where it departs from this spec
+
+v1 is built. It was verified against the replay fixture, and the Trials and Stats
+screens have been used on live runs. Where this section and an earlier section
+disagree, this section is the correction (the code wins).
+
+1. **Four routes, not three.** A Trials tab (the RO3 live-accuracy recorder) was
+   built in this dashboard, not only in the phone app. You declare the ground truth,
+   `state_server.py` snapshots its own live decision and scores it server-side, and
+   appends `trials.csv` (POST/GET `/trials`, DELETE `/trials/last`; live accuracy in
+   `/metrics.accuracy.live`). The dashboard sends only the label. Because of this,
+   `state_server.py` carries more than the one static-serving edit that 6.2 allowed:
+   it also hosts the trials endpoints. Results: 73 trials at 94.5% before the
+   posture fixes, 77 trials at 89.6% raw after (98.0% once operator timing settled).
+   See `../docs/RESUME.md`.
+2. **Web-first layout, not phone-first (owner decision).** At 900px and wider: a
+   fixed left sidebar (232px) with line icons and Sign out, content up to 1600px
+   wide. Below 900px: the original topbar plus floating bottom tab bar, now a
+   shared rubber (stretch then settle) segmented control. CSS-driven, so resizing
+   the window flips between them.
+3. **Visual language superseded in part.** The locked smart-home reference (green
+   primary, navy headings) was replaced, at the owner's request, by `../DESIGN.md`
+   in a hybrid form. Chrome is monochrome: canvas `#f5f5f5`, white borderless cards
+   with a soft two-layer shadow, near-black headings, dark pill buttons, sidebar
+   `#fafafa`. Semantic colour is kept because it carries meaning: profile accents
+   (A green, T blue, B amber, C slate), live green and down red, correct green and
+   miss red. Cards are borderless on purpose (owner preference over DESIGN.md's
+   hairline). Geist is not used: loading it from a CDN would break the no-cloud
+   rule (RO2), so the system font stack stays.
+4. **Stats additions.** Session timeline strip (one block per decision, width =
+   dwell, reveals on load); Accuracy by response path (animated bars with n per
+   path, from `/trials`); a 2 column equal-height card grid; the number scramble on
+   the headline only; a latency "Explain" modal (portaled to body, blur only, no
+   tint); a rubber Session/Today/All selector.
+5. **Live.** The camera preview shows at the frame's native aspect (no 4:3 crop),
+   capped at 480px.
+6. **No new runtime dependencies.** A React Bits RubberSegment, a 21st.dev ChartLine
+   and BoardUI were reviewed and not installed (they need `motion`, Tailwind or
+   shadcn). The rubber control and the charts are hand-rolled CSS/SVG
+   (`src/ui/RubberSegment.tsx`, `src/ui/Stats.tsx`).
+
+**Open**
+- Accuracy by response path shows on both Stats and Trials. Pending owner choice:
+  Stats owns it and Trials keeps only recording progress, or remove it from Stats.
+- Two greens were left on purpose as positive emphasis (the activation-reduction
+  bars, the Live edge-statement card). Neutralize them if they read as too colourful
+  against the monochrome chrome.
+- Controls (`override.json`) remains v2.
