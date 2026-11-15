@@ -70,7 +70,7 @@ export default function Stats({
           <div className="muted" style={{ fontSize: 13 }}>
             Window: {secs(metrics.window.seconds)} of data.
           </div>
-          <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", alignItems: "start" }}>
+          <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(min(420px, 100%), 1fr))", alignItems: "start" }}>
             <AccuracyCard metrics={metrics} />
             <LatencyCard metrics={metrics} />
             <ActivationCard metrics={metrics} />
