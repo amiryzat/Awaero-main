@@ -20,6 +20,7 @@ import csv
 import io
 import json
 import math
+import mimetypes
 import os
 import socket
 import threading
@@ -32,6 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.path.join(HERE, "live_log.csv")
 EVAL_PATH = os.path.join(HERE, "classify_results.csv")
 FRAME_PATH = os.path.join(HERE, "live_frame.jpg")   # written by live_system.py
+DIST = os.path.join(HERE, "web-dashboard", "dist")  # the built web dashboard (PRD 6.2)
 
 STALE_SECONDS = 30            # newest row older than this -> not online
 SESSION_GAP_SECONDS = 30 * 60  # a gap this long, or time going backwards, splits sessions
@@ -358,6 +360,27 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 self._send(404, {"error": "no live frame"})
         else:
+            self._serve_static(url.path)   # the built web dashboard (PRD 6.2)
+
+    def _serve_static(self, path):
+        """Serve web-dashboard/dist/ for any path the API routes above did not
+        claim. Read-only. The only disk-by-request serving this project does, so
+        the traversal guard below is a hard trust boundary even on a LAN."""
+        index = os.path.join(DIST, "index.html")
+        if not os.path.isfile(index):      # normal state before the first build
+            return self._send(503, b"web-dashboard not built yet. "
+                              b"Run: cd web-dashboard && npm run build\n", "text/plain")
+        dist_real = os.path.realpath(DIST)
+        target = os.path.realpath(os.path.join(DIST, path.lstrip("/") or "index.html"))
+        if target != dist_real and not target.startswith(dist_real + os.sep):
+            return self._send(403, {"error": "forbidden"})   # escaped dist/
+        if not os.path.isfile(target):
+            target = index                 # SPA fallback: unknown route -> index.html
+        ctype = mimetypes.guess_type(target)[0] or "application/octet-stream"
+        try:
+            with open(target, "rb") as f:
+                self._send(200, f.read(), ctype)
+        except OSError:
             self._send(404, {"error": "not found"})
 
     def log_message(self, *args):      # the phone polls every 2 s, keep the terminal quiet

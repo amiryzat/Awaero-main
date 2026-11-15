@@ -1,0 +1,242 @@
+:root {
+  color-scheme: light;
+
+  /* Design tokens (PRD 7.-1), defined once, never hard-coded per component. */
+  --green: #4f9e70;
+  --green-soft: #e8f3ec;
+  --navy: #1e3a5f;
+  --slate: #8a94a6;
+  --subtle: #aeb6c2;
+  --bg: #f3f5f7;
+  --card: #ffffff;
+  --radius: 18px;
+  --shadow: 0 2px 8px rgba(30, 58, 95, 0.08);
+
+  /* Stronger-than-stock easing (emil-design-eng): built-in curves lack punch. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+  /* FYP profile accents, kept so T/A/B/C stay distinguishable. */
+  --a: #15803d;
+  --t: #3b82f6;
+  --b: #f59e0b;
+  --c: #94a3b8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--navy);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--navy);
+  margin: 0;
+}
+
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.pill {
+  border: none;
+  border-radius: 999px;
+  background: var(--green);
+  color: #fff;
+  font-weight: 600;
+  font-size: 15px;
+  padding: 13px 22px;
+  cursor: pointer;
+  transition:
+    transform 160ms var(--ease-out),
+    background 160ms var(--ease-out);
+}
+
+/* Instant feedback on press: the UI confirms it heard the tap. */
+.pill:active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .pill:hover {
+    background: #469064;
+  }
+}
+
+.pill:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.banner {
+  background: #fff7e6;
+  color: #92631b;
+  border: 1px solid #f3d99a;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.muted {
+  color: var(--slate);
+}
+
+/* Web-first layout system (owner override of the PRD's phone-first default).
+   Reused by every screen; stays usable down to phone width over the cable. */
+.topbar {
+  background: var(--card);
+  box-shadow: var(--shadow);
+  padding: 14px clamp(16px, 4vw, 40px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand {
+  font-weight: 700;
+  color: var(--green);
+  letter-spacing: 1px;
+  font-size: 20px;
+}
+
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: clamp(16px, 4vw, 32px);
+  padding-bottom: 104px; /* clear the floating tab bar */
+  display: grid;
+  gap: 16px;
+}
+
+.tabbar {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  background: var(--card);
+  box-shadow: 0 6px 24px rgba(30, 58, 95, 0.16);
+  border-radius: 999px;
+  padding: 6px;
+  z-index: 20;
+}
+
+.tabbar button {
+  border: none;
+  background: transparent;
+  color: var(--slate);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 22px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 180ms var(--ease-out),
+    color 180ms var(--ease-out),
+    transform 160ms var(--ease-out);
+}
+
+.tabbar button:active {
+  transform: scale(0.96);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tabbar button:not(.active):hover {
+    color: var(--navy);
+  }
+}
+
+.tabbar button.active {
+  background: var(--green);
+  color: #fff;
+}
+
+/* One quick fade on tab change. Keyed per tab so it plays on switch, never on
+   the 2s data re-renders. Reduced to opacity-only under reduced-motion. */
+.fade-in {
+  animation: fade-in 200ms var(--ease-out) both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+  .fade-in {
+    animation: fade-in-plain 160ms ease both;
+  }
+  @keyframes fade-in-plain {
+    from {
+      opacity: 0;
+    }
+  }
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.grid-4 {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 700;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--navy);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin: 6px 2px 2px;
+}
