@@ -28,10 +28,14 @@
      four FYP profile accents so T/A/B/C stay distinguishable. */
   --green: #15803d;
   --green-soft: #e8f3ec;
-  --a: #15803d;
-  --t: #3b82f6;
-  --b: #f59e0b;
-  --c: #94a3b8;
+  /* Pastel profile colours for every bar, chart and profile fill: each is a 45%
+     tint of its original (A #15803d, T #3b82f6, B #f59e0b, C #94a3b8), so the hues
+     stay recognisable. Text that sits on these uses ink, not white. --green stays
+     strong because it is also used as text/status colour. */
+  --a: #7eb994;
+  --t: #93bafa;
+  --b: #faca79;
+  --c: #c4ccd8;
 }
 
 * {
@@ -287,16 +291,14 @@ h3 {
   flex-shrink: 0;
 }
 
+/* The active item's dark pill is the sliding RubberSegment thumb, not this
+   button's own background. RubberSegment sets background and colour inline, so
+   the hover rule needs !important to beat it (inactive items only). */
 @media (hover: hover) and (pointer: fine) {
-  .sidebar-item:not(.active):hover {
-    background: #f0f0f0;
-    color: var(--navy);
+  .sidebar-item:not([data-active="true"]):hover {
+    background: #f0f0f0 !important;
+    color: var(--navy) !important;
   }
-}
-
-.sidebar-item.active {
-  background: var(--primary);
-  color: #fafafa;
 }
 
 @media (min-width: 900px) {

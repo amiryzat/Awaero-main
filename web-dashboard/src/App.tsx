@@ -5,6 +5,7 @@ import Live from "./ui/Live";
 import Stats from "./ui/Stats";
 import Trials, { LABELS } from "./ui/Trials";
 import RubberSegment from "./ui/RubberSegment";
+import TechText from "./ui/TechText";
 import { isSignedIn, signOut } from "./lib/session";
 import { useSystem, type Conn, type MetricsWindow } from "./lib/useSystem";
 import type { SystemState } from "./lib/types";
@@ -95,8 +96,6 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         <div className="banner">Replay data, not a live system</div>
       )}
 
-      <ConnLine conn={conn} online={state?.online} stale={state?.stale_seconds} />
-
       <div key={tab} className="fade-in">
         {tab === "home" && <Home state={state} history={history} metrics={metrics} />}
         {tab === "live" && <Live state={state} />}
@@ -106,8 +105,12 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         )}
       </div>
 
-      <footer className="muted" style={{ fontSize: 12, textAlign: "center", marginTop: 8 }}>
-        build {__BUILD_STAMP__}
+      <footer
+        className="muted"
+        style={{ fontSize: 12, marginTop: 8, display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: 12 }}
+      >
+        <ConnLine conn={conn} online={state?.online} stale={state?.stale_seconds} />
+        <span>build {__BUILD_STAMP__}</span>
       </footer>
     </>
   );
@@ -117,18 +120,61 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
       {/* Web: a left sidebar. Hidden under 900px (CSS), where the topbar + bottom
           tab bar take over. Resizing the window flips between the two. */}
       <aside className="sidebar">
-        <span className="brand" style={{ padding: "2px 12px 22px" }}>AWAERO</span>
-        <nav style={{ display: "grid", gap: 4 }}>
-          {NAV.map((n) => (
-            <button
-              key={n.id}
-              className={`sidebar-item${tab === n.id ? " active" : ""}`}
-              onClick={() => setTab(n.id)}
-            >
-              {n.icon}
-              <span>{n.label}</span>
-            </button>
-          ))}
+        {/* Compact TechText logo: hover reveals the dashed outline. Labels, letter
+            dragging, click-kick and the idle sweep are off: too busy, and a
+            permanent animation loop, for a 52px nav logo on every screen. */}
+        <div
+          role="img"
+          aria-label="Awaero"
+          style={{ width: "100%", height: 52, position: "relative", color: "var(--navy)", marginBottom: 14 }}
+        >
+          <TechText
+            text="AWAERO"
+            fontWeight={700}
+            fontSize={36}
+            letterSpacing={0.02}
+            align="left"
+            reveal="letter"
+            reach={70}
+            dashLength={3}
+            dashGap={2}
+            strokeWidth={1.2}
+            specks={6}
+            labels={false}
+            selection={false}
+            draggable={false}
+            clickKick={false}
+            sweep={false}
+            accentColor="#7eb994"
+            intro="none"
+          />
+        </div>
+        {/* The dark active pill is the sliding RubberSegment thumb: it stretches
+            down or up to the next item and settles, like the mobile tab bar. */}
+        <nav>
+          <RubberSegment
+            vertical
+            options={NAV.map((n) => n.id)}
+            value={tab}
+            onChange={setTab}
+            label={(id) => {
+              const n = NAV.find((x) => x.id === id)!;
+              return (
+                <>
+                  {n.icon}
+                  <span>{n.label}</span>
+                </>
+              );
+            }}
+            thumb="var(--primary)"
+            thumbShadow="none"
+            thumbRadius={18}
+            activeText="#fafafa"
+            inactiveText="var(--slate)"
+            itemClassName="sidebar-item"
+            itemStyle={{ padding: "11px 14px", fontSize: 15, fontWeight: 500, textTransform: "none", borderRadius: 18 }}
+            containerStyle={{ display: "flex", gap: 4, width: "100%" }}
+          />
         </nav>
         <button
           className="pill"
@@ -194,7 +240,7 @@ function CaptureBanner({ pending, flash, state, onCancel }: {
           display: "flex", alignItems: "center", gap: 14, padding: "12px 16px",
           boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
         }}>
-          <div style={{ fontSize: 38, fontWeight: 800, color: "var(--t)", lineHeight: 1, minWidth: 54 }}>
+          <div style={{ fontSize: 38, fontWeight: 800, color: "var(--navy)", lineHeight: 1, minWidth: 54 }}>
             {pending.left}s
           </div>
           <div style={{ flex: 1 }}>
@@ -220,12 +266,12 @@ function CaptureBanner({ pending, flash, state, onCancel }: {
         boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
       }}>
         <div>
-          {flash!.ok ? "✓ Correct" : "✗ Miss"} — expected {LABELS[flash!.expected] ?? flash!.expected},
+          {flash!.ok ? "✓ Correct" : "✗ Miss"} · expected {LABELS[flash!.expected] ?? flash!.expected},
           system read {LABELS[flash!.got] ?? flash!.got}
         </div>
         {(flash!.vlm || flash!.decide) && (
           <div className="muted" style={{ fontSize: 12, fontWeight: 500, marginTop: 4 }}>
-            latency · VLM detect {flash!.vlm ? `${flash!.vlm}s` : "—"} · decide {flash!.decide ? `${flash!.decide}ms` : "—"}
+            latency · VLM detect {flash!.vlm ? `${flash!.vlm}s` : "-"} · decide {flash!.decide ? `${flash!.decide}ms` : "-"}
           </div>
         )}
       </div>

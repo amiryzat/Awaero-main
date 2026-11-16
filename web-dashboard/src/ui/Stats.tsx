@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Metrics, Profile, Stat } from "../lib/types";
+import { APPLIANCE_LABELS } from "../lib/types";
+import type { Appliances, Metrics, Profile, Stat } from "../lib/types";
 import type { MetricsWindow } from "../lib/useSystem";
 import RubberSegment from "./RubberSegment";
 
@@ -89,7 +90,7 @@ function TimelineCard({ metrics }: { metrics: Metrics }) {
     return () => cancelAnimationFrame(id);
   }, []);
 
-  const color = (p: string) => (p in PROFILE_META ? PROFILE_META[p as Profile].accent : "var(--green)");
+  const color = (p: string) => (p in PROFILE_META ? PROFILE_META[p as Profile].accent : "var(--a)");
   const name = (p: string) => (p in PROFILE_META ? PROFILE_META[p as Profile].label : p);
 
   return (
@@ -149,9 +150,9 @@ const ACC_PATHS = [
   { id: "T", label: "Transitional", accent: "var(--t)" },
   { id: "B", label: "Resting", accent: "var(--b)" },
   { id: "C", label: "Unoccupied", accent: "var(--c)" },
-  { id: "open_palm", label: "Open palm", accent: "var(--green)" },
-  { id: "peace", label: "Peace", accent: "var(--green)" },
-  { id: "fist", label: "Fist", accent: "var(--green)" },
+  { id: "open_palm", label: "Open palm", accent: "var(--a)" },
+  { id: "peace", label: "Peace", accent: "var(--a)" },
+  { id: "fist", label: "Fist", accent: "var(--a)" },
 ] as const;
 
 type PathSumm = { n: number; correct: number; pct: number };
@@ -404,13 +405,15 @@ function ActivationCard({ metrics }: { metrics: Metrics }) {
             <AnimatedNumber value={a.reduction_pct} suffix="%" />
           </div>
           <div style={{ marginTop: 14 }}>
-            {(["light", "fan", "tv"] as const).map((k) => (
+            {/* Only the appliances this log recorded: a run from before the
+                desk lamp existed must not show an empty lamp bar. */}
+            {Object.entries(a.per_appliance).map(([k, v]) => (
               <AnimatedBar
                 key={k}
-                label={k}
-                pct={a.per_appliance[k].reduction_pct}
-                suffix={`off · on ${secs(a.per_appliance[k].on_seconds)}`}
-                color="var(--green)"
+                label={APPLIANCE_LABELS[k as keyof Appliances] ?? k}
+                pct={v!.reduction_pct}
+                suffix={`off · on ${secs(v!.on_seconds)}`}
+                color="var(--a)"
               />
             ))}
           </div>

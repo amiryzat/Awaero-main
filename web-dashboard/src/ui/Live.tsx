@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SystemState } from "../lib/types";
+import type { Appliances, SystemState } from "../lib/types";
 
 // Live: the pipeline, for RO2 (PRD 7.2). Legibility over polish. This is the
 // screen that explains the system to an examiner. Nothing here is faked.
@@ -147,7 +147,7 @@ function PipelineStrip({
   pose: string | null;
   vlm: string | null;
   profile: string;
-  appliances: { light: boolean; fan: boolean; tv: boolean };
+  appliances: Appliances;
   mode: string;
   gate: boolean;
 }) {
@@ -223,7 +223,7 @@ function Stage({
             marginTop: 4,
             fontSize: 10,
             fontWeight: 700,
-            color: "#fff",
+            color: "var(--navy)",
             background: "var(--t)",
             borderRadius: 999,
             padding: "2px 8px",
@@ -245,13 +245,15 @@ function ApplianceStage({
   appliances,
   mode,
 }: {
-  appliances: { light: boolean; fan: boolean; tv: boolean };
+  appliances: Appliances;
   mode: string;
 }) {
   const items: [string, boolean | "auto"][] = [
     ["Light", appliances.light],
     ["Fan", mode === "ACTIVE" ? "auto" : appliances.fan], // active never sets the fan
     ["TV", appliances.tv],
+    ["Lamp", appliances.lamp],
+    ["AC", appliances.ac],
   ];
   return (
     <div style={{ flex: "1 1 120px", minWidth: 120, textAlign: "center", padding: "10px 8px" }}>

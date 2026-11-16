@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { signIn } from "../lib/session";
+import TechText from "./TechText";
 
 // The cosmetic demo gate (PRD 7.0). Looks like a real sign-in, gates nothing of
 // substance: any input signs in. See session.ts for why that is deliberate.
@@ -24,8 +25,32 @@ export default function Login({ onSignIn }: { onSignIn: () => void }) {
         margin: "0 auto",
       }}
     >
-      <div style={{ fontWeight: 700, color: "var(--navy)", letterSpacing: 1, marginBottom: 24 }}>
-        AWAERO
+      {/* The logo: React Bits TechText. Hover a letter to reveal its dashed
+          outline. The canvas has no text, so the wrapper carries the name. */}
+      <div
+        role="img"
+        aria-label="Awaero"
+        style={{
+          // TechText insets its text by 5% of its own width; pull it left by that
+          // so the wordmark lines up with the headline below.
+          width: "calc(100% + 20px)", marginLeft: -20,
+          height: 120, position: "relative", color: "var(--navy)", marginBottom: 12,
+        }}
+      >
+        <TechText
+          text="AWAERO"
+          fontWeight={700}
+          fontSize={96}
+          letterSpacing={0.02}
+          align="left"
+          reveal="letter"
+          reach={150}
+          dashLength={4}
+          dashGap={2}
+          specks={15}
+          accentColor="#7eb994"
+          intro="none"
+        />
       </div>
       <h1 style={{ fontSize: 34, lineHeight: 1.15, marginBottom: 14 }}>
         Feel comfort

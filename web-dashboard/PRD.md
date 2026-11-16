@@ -489,7 +489,8 @@ disagree, this section is the correction (the code wins).
 2. **Web-first layout, not phone-first (owner decision).** At 900px and wider: a
    fixed left sidebar (232px) with line icons and Sign out, content up to 1600px
    wide. Below 900px: the original topbar plus floating bottom tab bar, now a
-   shared rubber (stretch then settle) segmented control. CSS-driven, so resizing
+   shared rubber (stretch then settle) segmented control; the sidebar's active pill
+   uses the same component in vertical mode. CSS-driven, so resizing
    the window flips between them.
 3. **Visual language superseded in part.** The locked smart-home reference (green
    primary, navy headings) was replaced, at the owner's request, by `../DESIGN.md`
@@ -510,7 +511,11 @@ disagree, this section is the correction (the code wins).
 6. **No new runtime dependencies.** A React Bits RubberSegment, a 21st.dev ChartLine
    and BoardUI were reviewed and not installed (they need `motion`, Tailwind or
    shadcn). The rubber control and the charts are hand-rolled CSS/SVG
-   (`src/ui/RubberSegment.tsx`, `src/ui/Stats.tsx`).
+   (`src/ui/RubberSegment.tsx`, `src/ui/Stats.tsx`). One exception, which needs no
+   npm package: the React Bits TechText (JS-CSS) is vendored unmodified as source
+   (`src/ui/TechText.jsx`, `.css`, plus a `.d.ts` for strict TypeScript) and draws
+   the Awaero logo on the Login screen and the web sidebar. It adds about 19 KB to
+   the bundle and makes no network calls (checked: no fetch, eval or storage).
 
 **Open**
 - Accuracy by response path shows on both Stats and Trials. Pending owner choice:

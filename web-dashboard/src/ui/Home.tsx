@@ -1,4 +1,4 @@
-import type { Decision, Metrics, SystemState } from "../lib/types";
+import type { Appliances, Decision, Metrics, SystemState } from "../lib/types";
 
 // Home: the smart-home face (PRD 7.1), mirroring the reference middle panel.
 // Every value traces to a fixture row. Nothing invented.
@@ -55,6 +55,8 @@ export default function Home({
           <ApplianceTile name="Light" value={applianceState(cur, online, "light")} />
           <ApplianceTile name="Fan" value={applianceState(cur, online, "fan")} />
           <ApplianceTile name="TV" value={applianceState(cur, online, "tv")} />
+          <ApplianceTile name="Desk lamp" value={applianceState(cur, online, "lamp")} />
+          <ApplianceTile name="AC" value={applianceState(cur, online, "ac")} />
         </div>
       </div>
 
@@ -100,8 +102,8 @@ function Hero({ state }: { state: SystemState | null }) {
           width: 76,
           height: 76,
           borderRadius: 20,
-          background: isProfile ? meta.accent : "var(--green)",
-          color: "#fff",
+          background: isProfile ? meta.accent : "var(--a)",
+          color: "var(--navy)",
           display: "grid",
           placeItems: "center",
           fontSize: 38,
@@ -133,7 +135,7 @@ function ProfileCard({ profile, active, pct }: { profile: string; active: boolea
       className="card"
       style={{
         background: active ? meta.accent : "var(--card)",
-        color: active ? "#fff" : "var(--navy)",
+        color: "var(--navy)",
         padding: 16,
       }}
     >
@@ -154,7 +156,7 @@ type TileState = "on" | "off" | "auto";
 
 // Active mode never sets the fan (PRD 2), so it reads as auto, never a guessed
 // on/off. A tile that lies is forbidden (PRD rule 2).
-function applianceState(cur: Decision | null, online: boolean, key: "light" | "fan" | "tv"): TileState | null {
+function applianceState(cur: Decision | null, online: boolean, key: keyof Appliances): TileState | null {
   if (!cur || !online) return null;
   if (cur.mode === "ACTIVE" && key === "fan") return "auto";
   return cur.appliances[key] ? "on" : "off";
@@ -227,7 +229,7 @@ function RecentList({ history }: { history: Decision[] }) {
                   width: 9,
                   height: 9,
                   borderRadius: "50%",
-                  background: isProfile ? PROFILE_META[d.profile].accent : "var(--green)",
+                  background: isProfile ? PROFILE_META[d.profile].accent : "var(--a)",
                 }}
               />
               <span style={{ fontWeight: 600, fontSize: 14 }}>{label}</span>

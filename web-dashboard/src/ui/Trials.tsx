@@ -76,9 +76,9 @@ export default function Trials({ state, delay, setDelay, pending, onArm }: {
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <div>
-        <div className="muted" style={{ fontSize: 14 }}>RO3 instrument</div>
+      <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: 10 }}>
         <h1 style={{ fontSize: 26 }}>Trials</h1>
+        <span className="muted" style={{ fontSize: 14 }}>RO3 instrument</span>
       </div>
 
       {/* Live now: what the system reads this instant */}
@@ -130,7 +130,7 @@ export default function Trials({ state, delay, setDelay, pending, onArm }: {
         <div className="section-title">Record a gesture trial</div>
         <div className="grid-4">
           {GESTURES.map((g) => (
-            <RecordButton key={g.id} id={g.id} label={g.label} sub={g.sub} accent="var(--green)"
+            <RecordButton key={g.id} id={g.id} label={g.label} sub={g.sub} accent="var(--a)"
               count={report?.per_path[g.id]?.n ?? 0} disabled={blocked} onClick={onArm} />
           ))}
         </div>
@@ -223,7 +223,7 @@ function PathRow({ label, summ }: { label: string; summ?: Summ }) {
       <span style={{ width: 96, flexShrink: 0 }}>{label}</span>
       <span style={{ flex: 1, height: 8, background: "#eef1f4", borderRadius: 99, overflow: "hidden" }}>
         <span style={{ display: "block", height: "100%", width: `${frac * 100}%`,
-          background: n >= TARGET ? "var(--green)" : "var(--t)" }} />
+          background: n >= TARGET ? "var(--a)" : "var(--t)" }} />
       </span>
       <span className="muted" style={{ width: 92, textAlign: "right", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
         {summ ? `${summ.pct}% · ${n}/${TARGET}` : `0/${TARGET}`}
