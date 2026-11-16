@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "Awaero",
+    "slug": "awaero",
+    "version": "1.0.0",
+    "scheme": "awaero",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.amiryzat.awaero",
+      "appleTeamId": "JD4BDAJD6U",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Connects to the state server on your Mac over the local network to show the room status."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

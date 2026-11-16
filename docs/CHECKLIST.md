@@ -107,6 +107,13 @@ Last updated: 2026-11-15. Newest live-state pointer: `docs/RESUME.md`.
       restyle to `DESIGN.md` (monochrome chrome, profile/status colours kept),
       borderless soft-shadow cards. No new runtime dependencies. Departures from the
       spec: `web-dashboard/PRD.md` Section 11
+- [x] **Awaero phone app - BUILT (2026-11-16).** `awaero-app/`, a copy of
+      app-monitor that leaves the old app alone (`com.amiryzat.awaero`, both on the
+      iPhone 17). Five appliances, a Trials tab on the same `trials.csv`, real trial
+      accuracy on Stats. Simulator-tested, then installed. See `awaero-app/PROGRESS.md`
+- [x] Phone camera feed fixed: `state_server.py` sent `no-store` on the frame, which
+      React Native refuses; frames are `no-cache` now
+- [ ] Record a trial from the phone on real hardware (only simulator-tested so far)
 - [ ] Decide which tab owns per-path accuracy (it shows on both Stats and Trials)
 - [ ] Manual override (Controls -> `override.json` -> system), PRD Phase 6-7.
       Controls tab is still read-only

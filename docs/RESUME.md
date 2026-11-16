@@ -2,7 +2,7 @@
 
 Newest-state pointer for a new chat. Read this first, then `CHECKLIST.md`
 (what is built vs not), `CONTEXT.md` (decisions), `PROGRESS.md` (build state).
-Last updated: 2026-11-15 (night, after the web-dashboard UI session).
+Last updated: 2026-11-16 (night, after the Awaero phone-app session).
 
 ## One-line status
 Dashboard + Trials recorder BUILT. The three live-run fixes are BUILT and
@@ -10,6 +10,35 @@ VALIDATED in a second run. **Before: 73 trials, 94.5%. After: 77 trials, 89.6%
 raw -> A & B both now 100% (were 90/80), and 98.0% (50/51) once operator timing
 settled.** The before/after is the Chapter 4 story. Next = writing + the
 per-transition latency table.
+
+## What happened 2026-11-16 (night): the Awaero phone app
+- **New phone app `awaero-app/`, named Awaero** (`com.amiryzat.awaero`). It is a
+  COPY of `app-monitor/`, made on the owner's instruction not to disturb the old
+  app. `app-monitor/` is untouched and still installed; both sit on the iPhone 17
+  side by side. Details: `awaero-app/PROGRESS.md`.
+- **It now carries the same data as the web dashboard:** five appliances (light,
+  fan, TV, desk lamp, AC), a Trials tab (same `/trials` endpoints, same
+  `trials.csv`, capture countdown that survives tab switches, buzz at capture),
+  and real trial accuracy with per-path bars on Stats.
+- **Camera feed bug found and fixed in `state_server.py`:** every response carried
+  `Cache-Control: no-store`, and React Native's image loader refuses a no-store
+  image, so the phone's Live tab said "Camera feed offline" while the browser
+  showed the frame. Frames now go out as `no-cache`; everything else stays
+  `no-store`. This also fixes the old app. Selftest passes.
+- **The running state server was stale.** It had been up since 2026-11-15 21:04,
+  from before the 5-appliance change, so it was still reporting only light, fan
+  and TV. Restarted from the current code on port 8000.
+- **Verified:** simulator (all five tabs, camera frame, 5-appliance log) and one
+  full trial end to end against an isolated copy of the server, so the real
+  `trials.csv` was not written. tsc + expo lint clean. Installed and launched on
+  the iPhone 17.
+- **Open:** (1) the phone's connection to the Mac was not seen from the Mac side
+  after install: a new app must be given Local Network permission on first
+  launch, so check the phone; (2) no trial has been recorded from the phone on
+  real hardware yet; (3) `awaero-app/` is untracked in this repo and has no git
+  repo of its own, the owner has not said where it should live; (4) the web
+  dashboard still shows the fan as "Auto" in gesture mode, which is stale now
+  that gesture rows log the full appliance vector.
 
 ## What happened NIGHT (2026-11-15, web-dashboard UI session)
 The dashboard got a full UI pass. No FYP Python changed in this session, only
