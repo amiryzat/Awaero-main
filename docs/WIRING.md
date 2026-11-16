@@ -25,21 +25,17 @@ Firmware: arduino/room_node.ino, protocol "light,fan,tv,lamp,ac\n".
 
 One-time: male-male wire Arduino GND (POWER row) -> blue (-) rail.
 
-## Policy note (new, per FYP_Room_Activity_and_Appliance_Decision_Profiles.md)
-Code FUSED_APP still the OLD 3-appliance policy; NOT yet updated to the doc.
-New policy to apply (order light,fan,tv,lamp,ac):
-  A sitting  : light ON, fan ON, TV OFF, lamp ON,  AC (tbd)
-  T standing : light ON, fan ON, TV hold, lamp OFF, AC hold
-  B lying    : light OFF,fan ON, TV OFF, lamp OFF, AC (tbd)
+## Policy (live in code as of 2026-11-16, commit 3ff8338)
+Implements FYP_Room_Activity_and_Appliance_Decision_Profiles.md section 4.
+Order light,fan,tv,lamp,ac. HOLD = "No change" (keeps whatever is on).
+  A sitting  : light ON, fan ON, TV OFF, lamp ON,  AC ON
+  T standing : light ON, fan ON, TV HOLD, lamp OFF, AC HOLD
+  B lying    : light OFF,fan ON, TV OFF, lamp OFF, AC ON
   C empty    : all OFF
-AC rule deferred (owner: decide later; no temp sensor yet -> assumed policy).
+AC is an ASSUMED policy (no temperature sensor). If a DHT11 is added later it
+becomes genuinely temperature-aware; until then the writing must call it a
+configurable assumption, per the doc.
 
-## LCD (16x2 I2C, addr 0x27) - same Arduino as the LEDs
-| LCD pin | Goes to                                      |
-|---------|----------------------------------------------|
-| GND     | blue (-) rail                                |
-| VCC     | red (+) rail  (one wire: Arduino 5V -> red rail) |
-| SDA     | Arduino A4                                    |
-| SCL     | Arduino A5                                    |
-Status: WORKING (verified 2026-11-16 at 0x27, same Arduino as the LEDs).
-Earlier "boxes" was the LCD not yet fully wired, plus a stale python process
+## Still to do
+- stepper motor (28BYJ-48 + ULN2003) as the physical fan, pins 2-5
+- optional: servo as an AC vent flap; DHT11 for real temperature-based AC
