@@ -1,28 +1,36 @@
 /*
-  room_node - ONE Arduino drives the 3 appliance LEDs AND the 16x2 I2C LCD.
+  room_node - ONE Arduino drives the appliance LEDs AND the 16x2 I2C LCD.
+
+  Appliances (5): light, fan, tv, desk lamp, aircond.
+    pin 9  light    pin 10 fan    pin 11 tv    pin 8 desk lamp    pin 7 aircond
 
   Protocol over USB serial (9600 baud), one line per message:
-    "1,0,1\n"          LEDs: light, fan, tv on/off (pins 9, 10, 11) - same as power_leds
-    "top line|bottom\n" LCD: two lines of text (16 letters each); the Mac formats it
+    "1,0,1,1,0\n"       LEDs in order light,fan,tv,lamp,ac (0/1 each).
+                        Fewer values is fine: only the ones given are set,
+                        so an old "1,0,1" still drives light,fan,tv.
+    "top line|bottom\n" LCD: two lines of text; the Mac formats it.
 
-  Wiring: LEDs as before (pin 9 light, 10 fan, 11 tv).
-          LCD: GND -> GND, VCC -> 5V, SDA -> A4, SCL -> A5.
+  Wiring (each LED): digital pin -> 1k resistor -> LED long leg (anode);
+  LED short leg (cathode) -> breadboard blue (-) rail -> one wire to Arduino GND.
+  LCD (optional): GND->blue rail, VCC->5V, SDA->A4, SCL->A5.
 
-  If no LCD text arrives for TIMEOUT_MS the screen says NO SIGNAL, so a frozen
-  screen is never mistaken for a live one. The LEDs keep working with no LCD
-  plugged in (I2C writes to a missing screen just fail quietly).
+  The LCD is auto-detected at boot. With no LCD plugged in the LEDs still work
+  (we probe address 0x27 first and skip all LCD calls if nothing answers, so a
+  missing screen can never hang startup).
 */
 
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
-const int LIGHT = 9;
-const int FAN = 10;
-const int TV = 11;
+// Appliance order: light, fan, tv, lamp, ac
+const int PINS[] = {9, 10, 11, 8, 7};
+const int NPINS = 5;
+const uint8_t LCD_ADDR = 0x27;
 const unsigned long TIMEOUT_MS = 10000;
 
-LiquidCrystal_I2C lcd(0x27, 16, 2);   // address found by arduino/lcd_test
+LiquidCrystal_I2C lcd(LCD_ADDR, 16, 2);
 
+bool hasLcd = false;          // set at boot by probing the I2C bus
 char buf[40];
 uint8_t n = 0;
 unsigned long lastText = 0;
@@ -30,6 +38,7 @@ bool stale = false;
 
 // Print s on a row and pad with spaces: no clear() flicker, no leftovers.
 void row(uint8_t r, const char* s) {
+  if (!hasLcd) return;
   lcd.setCursor(0, r);
   uint8_t i = 0;
   for (; s[i] && i < 16; i++) lcd.print(s[i]);
@@ -47,24 +56,30 @@ void handleLine() {
     stale = false;
     return;
   }
-  char* c1 = strchr(buf, ',');       // LED command "a,b,c"
-  char* c2 = c1 ? strchr(c1 + 1, ',') : 0;
-  if (c1 && c2) {
-    digitalWrite(LIGHT, atoi(buf) ? HIGH : LOW);
-    digitalWrite(FAN, atoi(c1 + 1) ? HIGH : LOW);
-    digitalWrite(TV, atoi(c2 + 1) ? HIGH : LOW);
+  if (strchr(buf, ',')) {            // LED command "a,b,c,..." in pin order
+    char* p = buf;
+    for (int i = 0; i < NPINS && p; i++) {
+      digitalWrite(PINS[i], atoi(p) ? HIGH : LOW);
+      char* c = strchr(p, ',');
+      p = c ? c + 1 : 0;             // stop early if fewer values were sent
+    }
   }
 }
 
 void setup() {
-  pinMode(LIGHT, OUTPUT);
-  pinMode(FAN, OUTPUT);
-  pinMode(TV, OUTPUT);
+  for (int i = 0; i < NPINS; i++) pinMode(PINS[i], OUTPUT);
   Serial.begin(9600);
-  lcd.init();
-  lcd.backlight();
-  row(0, "Smart Power FYP");
-  row(1, "waiting for Mac");
+
+  // Probe for the LCD so a missing screen never blocks the LEDs.
+  Wire.begin();
+  Wire.beginTransmission(LCD_ADDR);
+  hasLcd = (Wire.endTransmission() == 0);
+  if (hasLcd) {
+    lcd.init();
+    lcd.backlight();
+    row(0, "Smart Power FYP");
+    row(1, "waiting for Mac");
+  }
   lastText = millis();
 }
 
@@ -78,7 +93,7 @@ void loop() {
       buf[n++] = c;
     }
   }
-  if (!stale && millis() - lastText > TIMEOUT_MS) {
+  if (hasLcd && !stale && millis() - lastText > TIMEOUT_MS) {
     row(0, "NO SIGNAL");
     row(1, "Mac not sending");
     stale = true;
