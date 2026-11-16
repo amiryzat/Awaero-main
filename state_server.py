@@ -39,7 +39,9 @@ TRIALS_PATH = os.path.join(HERE, "trials.csv")      # written by the Trials reco
 STALE_SECONDS = 30            # newest row older than this -> not online
 SESSION_GAP_SECONDS = 30 * 60  # a gap this long, or time going backwards, splits sessions
 FRAME_FRESH_SECONDS = 5       # a frame older than this is not "live"
-APPLIANCES = ("light", "fan", "tv")
+# Pin order in arduino/room_node.ino. Rows logged before the desk lamp and
+# aircond existed simply have no such column, which reads as off.
+APPLIANCES = ("light", "fan", "tv", "lamp", "ac")
 PROFILES = ("T", "A", "B", "C")
 
 # live_log.csv holds three kinds of row and only the first kind is a DECISION
@@ -163,15 +165,22 @@ def metrics(rows, window="session", tail=0.0, now=None):
 
     activation = None            # one row has no measurable duration yet
     if total > 0:
+        # Only appliances this log ACTUALLY RECORDED may count. A run logged
+        # before the desk lamp and aircond existed has no such column, and
+        # scoring a missing column as "off the whole time" would award a 100%
+        # saving for an appliance that was never wired - which would silently
+        # inflate the headline reduction figure. Absent column = not measured.
+        tracked = [k for k in APPLIANCES if any(k in r for r in sel)]
         per = {}
-        for k in APPLIANCES:
+        for k in tracked:
             on = sum(d for r, d in zip(sel, durs) if r.get(k) == "1")
             per[k] = {"on_seconds": round(on, 1), "baseline_seconds": round(total, 1),
                       "reduction_pct": round(100 * (1 - on / total), 1)}
-        activation = {
-            "reduction_pct": round(sum(p["reduction_pct"] for p in per.values()) / len(per), 1),
-            "per_appliance": per,
-        }
+        if per:
+            activation = {
+                "reduction_pct": round(sum(p["reduction_pct"] for p in per.values()) / len(per), 1),
+                "per_appliance": per,
+            }
 
     passive_total = sum(d for r, d in zip(sel, durs) if r["mode"] == "PASSIVE")
     dist = {}
@@ -501,6 +510,16 @@ SELFTEST_CSV = """time,mode,people,pose,vlm,phone,vlm_latency_s,profile,light,fa
 """
 
 
+# A log from the 5-appliance system. 200 s of decisions: 100 s A (light, fan,
+# lamp, ac on; TV off) then 100 s C (all off). So light/fan/lamp/ac run half
+# the time (50% reduction each) and the TV never runs at all (100%).
+FIVE_CSV = """time,mode,people,pose,vlm,phone,vlm_latency_s,profile,light,fan,tv,lamp,ac
+10:00:00,PASSIVE,1,A,A,no,1.0,A,1,1,0,1,1
+10:01:40,PASSIVE,0,C,,,,C,0,0,0,0,0
+10:03:20,PASSIVE,0,C,,,,C,0,0,0,0,0
+"""
+
+
 # The log as live_system.py writes it today: VLM rows between the decisions, and
 # an ACTIVE_ENTER row. Only the 4 PASSIVE/ACTIVE rows are decisions.
 MIXED_CSV = """time,mode,people,pose,vlm,phone,vlm_latency_s,profile,light,fan,tv
@@ -541,6 +560,18 @@ def _selftest_midnight():
     assert [r["session"] for r in parse_log(far, date(2026, 11, 15))] == [0, 0, 0, 1]
     print("selftest midnight ok")
 
+    # Five-appliance log: all five are measured, and the absent-column rule does
+    # NOT fire here because every column is present.
+    rows = parse_log(FIVE_CSV, date(2026, 11, 16))
+    per = metrics(rows, "all", tail=0)["activation"]["per_appliance"]
+    assert set(per) == {"light", "fan", "tv", "lamp", "ac"}, set(per)
+    assert per["lamp"]["reduction_pct"] == 50.0 and per["ac"]["reduction_pct"] == 50.0
+    assert per["tv"]["reduction_pct"] == 100.0          # TV never on while sitting
+    # the 3-column logs above must still average over 3, not be padded to 5
+    assert len(metrics(parse_log(SELFTEST_CSV, date(2026, 11, 14)), "all",
+                       tail=0)["activation"]["per_appliance"]) == 3
+    print("selftest five-appliance ok")
+
 
 def _selftest_mixed():
     """The format that broke the old parser. Decisions at 10:00, 10:01, 10:03,
@@ -556,7 +587,9 @@ def _selftest_mixed():
     # show the decision, not "mode VLM" with every appliance off.
     assert rows[-1]["mode"] == "VLM" and dec[-1]["profile"] == "B"
     d = decision(dec[-1])
-    assert d["mode"] == "PASSIVE" and d["appliances"] == {"light": False, "fan": True, "tv": False}
+    assert d["mode"] == "PASSIVE"
+    assert d["appliances"] == {"light": False, "fan": True, "tv": False,
+                               "lamp": False, "ac": False}
 
     m = metrics(rows, "all")
     assert m["window"]["seconds"] == 240

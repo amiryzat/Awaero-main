@@ -1,10 +1,14 @@
 """
-Display node driver: sends two 16-character lines to the LCD board (the second
-Arduino, running arduino/display_node). Same shape as serial_actuator: finds the
-port itself and falls back to printing if no board is plugged in.
+Display node driver: sends two 16-character lines to the 16x2 I2C LCD.
 
-    lcd = LcdDisplay()
-    lcd.show("PASSIVE Sitting", "L:ON F:ON TV:ON")
+The screen now lives on the SAME Arduino as the appliance LEDs (firmware
+arduino/room_node.ino accepts both "a,b,c,d,e" for LEDs and "top|bottom" for
+the screen on one wire), so the normal use is to hand it the actuator's open
+port. Passing nothing still hunts for a separate board, which is how the old
+two-board rig worked.
+
+    lcd = LcdDisplay(ser=act.ser)        # one board: share the open port
+    lcd.show("PASSIVE Sitting", "L+ F+ T- D+ A+")
 
 Call show() as often as you like: it only writes when the text changes, plus a
 heartbeat every few seconds so the board's NO SIGNAL timeout never fires while
@@ -40,21 +44,27 @@ def find_port(exclude=None):
 
 def status_lines(mode, profile, gesture, appl):
     """The two screen lines for the current state (max 16 characters each).
-    appl = (light, fan, tv) as 0/1. gesture is only used in ACTIVE mode."""
+    appl = (light, fan, tv, lamp, ac) as 0/1; gesture is ACTIVE mode only.
+    Five appliances cannot fit "L:ON F:ON ..." in 16 columns, so each gets one
+    initial and a +/- : "L+ F+ T- D+ A-" (Light Fan Tv Desklamp Ac) = 14."""
     if mode == "ACTIVE":
         top = "ACTIVE " + (gesture if gesture and gesture != "none" else "ready")
     else:
         top = "PASSIVE " + NAMES.get(profile, "?")
-    on = lambda v: "ON" if v else "--"
-    bottom = f"L:{on(appl[0])} F:{on(appl[1])} TV:{on(appl[2])}"
+    bottom = " ".join(f"{c}{'+' if v else '-'}" for c, v in zip("LFTDA", appl))
     return top[:WIDTH], bottom[:WIDTH]
 
 
 class LcdDisplay:
-    def __init__(self, port=None, exclude=None):
+    def __init__(self, port=None, exclude=None, ser=None):
         self.ser = None
         self._last = None
         self._sent = 0.0
+        self._owned = True          # False when we borrow someone else's port
+        if ser is not None:         # one-board rig: share the actuator's port
+            self.ser, self._owned = ser, False
+            print("[lcd] sharing the appliance board's serial port")
+            return
         if serial is None:
             print("[lcd] pyserial not installed - mock mode")
             return
@@ -93,22 +103,23 @@ class LcdDisplay:
         if self.ser:
             try:
                 self.show(bye, "")
-                self.ser.close()
+                if self._owned:     # never close a port we only borrowed
+                    self.ser.close()
             except Exception:
                 pass
 
 
 def _selftest():
-    assert status_lines("PASSIVE", "A", "none", (1, 1, 1)) == ("PASSIVE Sitting", "L:ON F:ON TV:ON")
-    assert status_lines("PASSIVE", "C", "none", (0, 0, 0)) == ("PASSIVE Empty", "L:-- F:-- TV:--")
-    assert status_lines("PASSIVE", "T", "none", (1, 0, 0))[0] == "PASSIVE Standing"
-    assert status_lines("ACTIVE", "A", "open_palm", (0, 0, 1))[0] == "ACTIVE open_palm"
-    assert status_lines("ACTIVE", "A", "none", (0, 0, 0))[0] == "ACTIVE ready"
+    assert status_lines("PASSIVE", "A", "none", (1, 1, 0, 1, 1)) == ("PASSIVE Sitting", "L+ F+ T- D+ A+")
+    assert status_lines("PASSIVE", "C", "none", (0, 0, 0, 0, 0)) == ("PASSIVE Empty", "L- F- T- D- A-")
+    assert status_lines("PASSIVE", "T", "none", (1, 1, 0, 0, 0))[0] == "PASSIVE Standing"
+    assert status_lines("ACTIVE", "A", "open_palm", (0, 0, 1, 0, 0))[0] == "ACTIVE open_palm"
+    assert status_lines("ACTIVE", "A", "none", (0, 0, 0, 0, 0))[0] == "ACTIVE ready"
     # nothing may ever exceed the 16-character screen width
     for mode in ("PASSIVE", "ACTIVE"):
         for prof in "TABC":
             for g in ("none", "open_palm", "peace", "fist"):
-                assert all(len(s) <= WIDTH for s in status_lines(mode, prof, g, (1, 1, 1)))
+                assert all(len(s) <= WIDTH for s in status_lines(mode, prof, g, (1, 1, 1, 1, 1)))
     sent = []
     fake = LcdDisplay(port="/dev/does-not-exist")
     fake.ser = type("S", (), {"write": lambda self, b: sent.append(b)})()

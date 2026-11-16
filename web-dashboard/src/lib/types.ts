@@ -3,7 +3,15 @@
 
 export type Profile = "T" | "A" | "B" | "C";
 export type Mode = "PASSIVE" | "ACTIVE" | "MANUAL";
-export type Appliances = { light: boolean; fan: boolean; tv: boolean };
+// Pin order in arduino/room_node.ino. lamp (desk lamp) and ac were added with
+// the revised decision profiles; logs recorded before them simply read false.
+export type Appliances = {
+  light: boolean; fan: boolean; tv: boolean; lamp: boolean; ac: boolean;
+};
+
+export const APPLIANCE_LABELS: Record<keyof Appliances, string> = {
+  light: "Light", fan: "Fan", tv: "TV", lamp: "Desk lamp", ac: "AC",
+};
 
 export type Decision = {
   at: string; // ISO 8601
@@ -45,9 +53,14 @@ export type Metrics = {
   activation: {
     // Simulated Appliance Activation Reduction
     reduction_pct: number;
-    per_appliance: Record<
-      keyof Appliances,
-      { on_seconds: number; baseline_seconds: number; reduction_pct: number }
+    // Partial: the server reports only the appliances a log ACTUALLY recorded,
+    // so a run from before the desk lamp and AC existed has no entry for them.
+    // Never index this blind - iterate it.
+    per_appliance: Partial<
+      Record<
+        keyof Appliances,
+        { on_seconds: number; baseline_seconds: number; reduction_pct: number }
+      >
     >;
   } | null; // null when the window holds a single row
   latency: {

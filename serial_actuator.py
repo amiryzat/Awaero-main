@@ -4,12 +4,14 @@ serial_actuator - sends LED states to the Arduino over USB serial.
 Replaces the mock-actuation print in live_passive.py / live_active.py.
 Auto-detects the board's serial port, so you do not hardcode /dev/cu.*.
 
-Protocol matches arduino/power_leds/power_leds.ino: "g,y,r\n" (0/1 each).
+Protocol matches arduino/room_node/room_node.ino: one 0/1 per appliance,
+comma separated, in pin order light,fan,tv,lamp,ac ("1,0,1,1,0\n"). The
+firmware sets only the values it is given, so a 3-value line still works.
 
 Usage:
     from serial_actuator import Actuator
     act = Actuator()           # opens the port, or runs in mock mode if none
-    act.set(green=1, yellow=0, red=0)
+    act.set(1, 0, 0, 1, 0)     # light, fan, tv, lamp, ac
     act.close()
 
 If no Arduino is found it prints instead of failing, so the pipeline still
@@ -56,8 +58,11 @@ class Actuator:
             print(f"[actuator] could not open {port}: {e} - mock mode")
             self.ser = None
 
-    def set(self, green, yellow, red):
-        msg = f"{int(bool(green))},{int(bool(yellow))},{int(bool(red))}\n"
+    def set(self, *values):
+        """Send one 0/1 per appliance in pin order (light, fan, tv, lamp, ac).
+        Variadic so the appliance count can change without touching callers;
+        the firmware only drives the pins it is actually given values for."""
+        msg = ",".join(str(int(bool(v))) for v in values) + "\n"
         if self.ser:
             try:
                 self.ser.write(msg.encode())
@@ -75,7 +80,7 @@ class Actuator:
     def close(self):
         if self.ser:
             try:
-                self.set(0, 0, 0)
+                self.set(0, 0, 0, 0, 0)
                 self.ser.close()
             except Exception:
                 pass

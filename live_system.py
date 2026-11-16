@@ -121,17 +121,37 @@ OVERRIDE_SECONDS = 60.0
 # room empties or ANY gesture cancels it). If fist also set 60 s holds, a "changed
 # my mind" gesture would release the latch but the fan/TV would stay stuck off
 # under those holds - so the latch alone owns the fist.
-GESTURE_HOLDS = {"peace": [0], "open_palm": [2], "fist": []}  # light,fan,tv
+GESTURE_HOLDS = {"peace": [0], "open_palm": [2], "fist": []}  # indexes into APPLIANCES
 
 # Decision Logic Layer (Layer 4): each profile -> a per-appliance on/off vector.
-# The 3 pins are RELABELLED from the green/yellow/red traffic light to appliances:
-# pin9=light, pin10=fan, pin11=tv. Same "a,b,c\n" firmware - no reflash.
-# ponytail: B's light is OFF, not dimmed (0/1 protocol can't PWM).
-FUSED_APP  = {"T": (1, 0, 0), "A": (1, 1, 1), "B": (0, 1, 0), "C": (0, 0, 0)}
+# Five appliances, in pin order (arduino/room_node.ino):
+#   pin 9 light, pin 10 fan, pin 11 tv, pin 8 desk lamp, pin 7 aircond.
+APPLIANCES = ("light", "fan", "tv", "lamp", "ac")
+NAPP = len(APPLIANCES)
+
+# HOLD = the spec's "No change": that appliance keeps whatever it is doing.
+# Standing is a TRANSITION, so it must not decide the TV or the AC - switching
+# them because someone stood up for 5 seconds is the exact thrashing the
+# supervisor's document warns about.
+HOLD = None
+
+# Policy from FYP_Room_Activity_and_Appliance_Decision_Profiles.md section 4.
+# Two changes from the first prototype, both deliberate:
+#   - sitting no longer turns the TV ON (sitting is not proof of watching), and
+#   - standing no longer turns the fan OFF (brief movement should not switch it).
+# ponytail: B's light is OFF, not dimmed (the 0/1 protocol cannot PWM).
+# AC is an ASSUMED policy, not a measured one: with no temperature sensor the
+# honest claim is "configurable assumption" (doc section 4). On while the
+# occupant is settled, held during a transition, off when the room empties.
+FUSED_APP  = {"A": (1, 1, 0, 1, 1),
+              "T": (1, 1, HOLD, 0, HOLD),
+              "B": (0, 1, 0, 0, 1),
+              "C": (0, 0, 0, 0, 0)}
 FUSED_NAME = {"T": "transitional (standing/walking)", "A": "active (sitting)",
               "B": "resting (lying)", "C": "unoccupied"}
-FUSED_ACT  = {"T": "light ON, fan+TV OFF", "A": "light + fan + TV ON",
-              "B": "light OFF, fan ON, TV OFF", "C": "all OFF"}
+FUSED_ACT  = {"T": "light+fan ON, lamp OFF, TV/AC held",
+              "A": "light+fan+lamp+AC ON, TV OFF",
+              "B": "fan+AC ON, light/TV/lamp OFF", "C": "all OFF"}
 
 LOG_PATH = "live_log.csv"
 LOG_FIELDS = ["time", "mode", "people", "pose", "vlm", "phone", "vlm_latency_s",
@@ -304,8 +324,15 @@ def leave_target(latch, committed):
     is held and someone is still present, otherwise the normal profile mapping.
     The caller clears the latch when this returns the normal mapping."""
     if latch and committed != "C":
-        return (0, 0, 0)
+        return (0,) * NAPP
     return FUSED_APP[committed]
+
+
+def resolve_hold(target, current):
+    """Turn a profile vector into real 0/1s. Any HOLD entry means "no change",
+    so it takes the appliance's CURRENT value instead of a fixed one."""
+    return tuple(current[i] if target[i] is HOLD else target[i]
+                 for i in range(len(target)))
 
 def debounce_vlm(label, history, stable, n=POSTURE_DEBOUNCE_N):
     """Call once per NEW VLM read. Returns the posture to feed fusion; mutates
@@ -330,8 +357,8 @@ def main():
     os.makedirs(SNAP_DIR, exist_ok=True)
 
     act = Actuator()
-    lcd = LcdDisplay(exclude=act.port)       # second Arduino: 16x2 status screen
-    appl = list(FUSED_APP["C"])              # [light, fan, tv] - ONE shared state
+    lcd = LcdDisplay(ser=act.ser)            # same Arduino drives LEDs + screen
+    appl = list(FUSED_APP["C"])              # one shared appliance state vector
     act.set(*appl)
 
     cam_index = camera.find_index()
@@ -404,7 +431,7 @@ def main():
     vctx = None                              # pose reading the VLM was judging
     snap = None                              # set on a decision -> saved after overlay
     last_relay = 0.0                         # last write of live_frame.jpg
-    hold_until = [0.0, 0.0, 0.0]             # per-appliance gesture override expiry
+    hold_until = [0.0] * NAPP                # per-appliance gesture override expiry
     frame_i = 0
     pose_label, people = None, []            # cached between pose runs
     gesture_seen_time = 0.0                  # last time a gesture was being held
@@ -532,7 +559,7 @@ def main():
                         if armed and held >= HOLD_SECONDS:
                             tv_on, lights_on = apply(stable, tv_on, lights_on)
                             if stable == "fist":
-                                appl[1] = 0          # all-off override kills the fan too
+                                appl[1] = appl[3] = appl[4] = 0   # all-off: fan, lamp, AC too
                                 leaving_latch = True # "leaving": stay off until room empties
                             else:
                                 leaving_latch = False  # a staying gesture cancels the latch
@@ -544,6 +571,7 @@ def main():
                             log_row(time=time.strftime("%H:%M:%S"), mode="ACTIVE",
                                     people=len(people), profile=stable,
                                     light=appl[0], fan=appl[1], tv=appl[2],
+                                    lamp=appl[3], ac=appl[4],
                                     decide_latency_ms=decide_ms,
                                     actuate_latency_ms=act_ms)
                             snap = stable
@@ -556,7 +584,8 @@ def main():
                     # ACTIVE until the next profile change (can be minutes away).
                     log_row(time=time.strftime("%H:%M:%S"), mode="PASSIVE",
                             people=len(people), profile=committed,
-                            light=appl[0], fan=appl[1], tv=appl[2])
+                            light=appl[0], fan=appl[1], tv=appl[2],
+                            lamp=appl[3], ac=appl[4])
 
                 # feed the VLM a clean frame when a person is present (upright -> it
                 # splits T/A; lying -> it only supplies the phone flag, which the
@@ -598,7 +627,7 @@ def main():
                             and votes >= SWITCH_RATIO * len(window))
                 if switched:
                     committed = cand
-                    hold_until = [0.0, 0.0, 0.0]   # context changed -> auto resumes
+                    hold_until = [0.0] * NAPP      # context changed -> auto resumes
 
                 # Drive every appliance that is NOT currently held by a gesture.
                 # Held ones keep the user's choice until their hold expires, so a
@@ -611,8 +640,9 @@ def main():
                 else:
                     leaving_latch = False
                     target = leave_target(False, committed)
-                if any(now >= hold_until[i] and appl[i] != target[i] for i in range(3)):
-                    for i in range(3):
+                target = resolve_hold(target, appl)   # "No change" keeps what is on
+                if any(now >= hold_until[i] and appl[i] != target[i] for i in range(NAPP)):
+                    for i in range(NAPP):
                         if now >= hold_until[i]:
                             appl[i] = target[i]
                     act_ms = timed_set(act, appl)
@@ -624,6 +654,7 @@ def main():
                             people=len(people), pose=pose_label, vlm=v or "",
                             phone=vlm_phone, vlm_latency_s=vlm_lat, profile=committed,
                             light=appl[0], fan=appl[1], tv=appl[2],
+                            lamp=appl[3], ac=appl[4],
                             decide_latency_ms=since_ms(t_frame),
                             actuate_latency_ms="" if act_ms is None else act_ms)
                     snap = committed
@@ -656,8 +687,9 @@ def main():
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             # the appliance truth = exactly what the three LEDs are doing
             on = lambda b: "ON " if b else "OFF"
-            cv2.putText(frame, f"LIGHT:{on(appl[0])}  FAN:{on(appl[1])}  TV:{on(appl[2])}",
-                        (15, 118), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+            cv2.putText(frame, " ".join(f"{n.upper()}:{on(v)}"
+                                        for n, v in zip(APPLIANCES, appl)),
+                        (15, 118), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
             if mode == "PASSIVE" and shared["want"]:
                 tag = f"VLM: {v or 'thinking...'}"
                 if vlm_phone:
@@ -759,8 +791,8 @@ def _selftest():
     assert list(h) == ["T", "T"]                            # None didn't enter history
 
     # fist "leaving" latch: all-off while present, resumes once the room empties
-    assert leave_target(True, "A") == (0, 0, 0)             # latched + present -> off
-    assert leave_target(True, "T") == (0, 0, 0)
+    assert leave_target(True, "A") == (0,) * NAPP           # latched + present -> off
+    assert leave_target(True, "T") == (0,) * NAPP
     assert leave_target(True, "C") == FUSED_APP["C"]        # empty -> normal (all off)
     assert leave_target(False, "A") == FUSED_APP["A"]       # no latch -> normal profile
 
@@ -825,7 +857,15 @@ def _selftest():
         assert rotate_stale_log(p) is False                # current header: left alone
 
     assert set(FUSED_APP) == {"T", "A", "B", "C"}            # every profile mapped
-    assert FUSED_APP["C"] == (0, 0, 0) and FUSED_APP["A"] == (1, 1, 1)
+    assert all(len(v) == NAPP for v in FUSED_APP.values())   # no short vector
+    assert FUSED_APP["C"] == (0,) * NAPP
+    # the two deliberate policy changes, pinned so they cannot regress silently
+    assert FUSED_APP["A"][2] == 0, "sitting must NOT switch the TV on"
+    assert FUSED_APP["T"][1] == 1, "standing must NOT switch the fan off"
+    # HOLD resolves against what is currently on, and only for HOLD entries
+    assert resolve_hold((1, 1, HOLD, 0, HOLD), [0, 0, 1, 1, 0]) == (1, 1, 1, 0, 0)
+    assert resolve_hold((1, 1, HOLD, 0, HOLD), [0, 0, 0, 1, 1]) == (1, 1, 0, 0, 1)
+    assert resolve_hold(FUSED_APP["C"], [1, 1, 1, 1, 1]) == (0,) * NAPP
     print("selftest ok")
 
 
