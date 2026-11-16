@@ -419,7 +419,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.send_header("Cache-Control", "no-store")
+        # The camera frame is the one response that must stay cacheable: React
+        # Native's image loader refuses a no-store image, which left the phone
+        # app's Live tab on "Camera feed offline" while the browser showed the
+        # frame. no-cache still makes every client re-ask before reusing one, so
+        # a stale frame can never pass as live.
+        self.send_header("Cache-Control", "no-cache" if ctype == "image/jpeg" else "no-store")
         self.end_headers()
         self.wfile.write(body)
 
