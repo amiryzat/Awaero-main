@@ -1,7 +1,7 @@
 # FYP Checklist
 
 Vision-Based Smart Power Management. What is built vs what is not.
-Last updated: 2026-11-15. Newest live-state pointer: `docs/RESUME.md`.
+Last updated: 2026-11-17. Newest live-state pointer: `docs/RESUME.md`.
 
 ## Done
 
@@ -19,8 +19,14 @@ Last updated: 2026-11-15. Newest live-state pointer: `docs/RESUME.md`.
       (pose guessing made the LEDs switch twice per event)
 - [x] Presence hysteresis: `EMPTY_SECONDS=8` (leaning forward no longer drops
       the room to unoccupied)
-- [x] **Per-appliance LEDs** - pin 9 light, 10 fan, 11 tv; `FUSED_APP` maps
-      T/A/B/C to on/off vectors. Same 3-pin firmware, no reflash
+- [x] **Five appliance LEDs** (2026-11-16) - pin 9 light, 10 fan, 11 tv,
+      8 desk lamp, 7 aircond; `FUSED_APP` maps T/A/B/C to 5-tuples. Firmware is
+      `arduino/room_node.ino` (variadic CSV), uploaded. Holes in `docs/WIRING.md`
+- [x] **Revised decision policy** (2026-11-16) from
+      `FYP_Room_Activity_and_Appliance_Decision_Profiles.md`: sitting no longer
+      turns the TV on, standing no longer turns the fan off (both pinned by
+      selftest). "No change" rows use a HOLD sentinel (`resolve_hold`); T holds
+      TV + AC. AC is an ASSUMED policy (no temp sensor), stated as such
 - [x] **Gesture override** - per appliance (peace = light, open palm = TV, fist =
       all), held 60 s or until the room context changes, then automation resumes.
       Overlay shows `[MANUAL Ns]`
@@ -49,23 +55,26 @@ Last updated: 2026-11-15. Newest live-state pointer: `docs/RESUME.md`.
 - [x] Model study written up: `docs/EVAL_passive_vlm.md` Runs 0-13
 
 ### Hardware / demo assets
-- [x] Arduino UNO, 3 LEDs, `power_leds` firmware, `serial_actuator.py`
-- [x] **Display node (2026-11-14):** second Arduino (black Techlympics Uno clone,
-      CH340, `/dev/cu.usbserial*`) drives a 16x2 I2C LCD (GND/5V/A4/A5, address
-      0x27). `arduino/display_node` firmware shows two lines sent by the Mac and
-      says NO SIGNAL after 10 s of silence; `display_node.py` formats the state
-      (`PASSIVE Sitting` / `L:ON F:ON TV:ON`) and `live_system.py` sends it.
-      Needs a DATA micro-USB cable (the first cable was power-only)
-- [~] Ran `live_system.py` with BOTH boards (2026-11-15): LEDs + phone app
-      follow correctly, but the **LCD shows RANDOM SYMBOLS**. Ruled out baud
-      (9600 both sides) and wiring/address (I2C scan found exactly 0x27).
-      Reflashed `arduino/display_node` with a fresh init; if still garbled the
-      suspect is power/brown-out (double `lcd.init()` is the fix). Pending Amir's
-      confirmation. Not blocking: LEDs + app are the real actuation
+- [x] Arduino UNO, 5 LEDs + LCD + stepper on `arduino/room_node.ino`, `serial_actuator.py` (variadic). `power_leds`/`display_node` sketches kept as history
+- [x] **LCD on ONE Arduino with the LEDs (2026-11-16):** the 16x2 I2C LCD (0x27,
+      GND->blue rail, VCC->red rail, SDA->A4, SCL->A5) runs on the SAME Uno as the
+      5 LEDs via `arduino/room_node.ino` - no second board. Shows two lines sent
+      by the Mac, NO SIGNAL after 10 s silence. `display_node.py` shares the
+      actuator's open port (`LcdDisplay(ser=act.ser)`) and renders 5 appliances
+      ("L+ F+ T- D+ A+") to fit 16 columns
+- [x] **LCD "random symbols" RESOLVED (2026-11-16):** it was an UNINITIALISED
+      screen, not a fault - the firmware hung in setup() probing a not-yet-wired
+      LCD, so nothing drove any pin. Firmware now probes 0x27 and skips all LCD
+      calls when absent, so the LEDs never hang. Verified writing text at 0x27
 - [ ] 7-segment display: verified common anode (dot lit) but parked; the LCD
       replaced it (needs 4 wires instead of 8)
-- [ ] LED board GND shortage: all 3 GND holes used; build a ground rail on the
-      big breadboard when the extra wires arrive
+- [x] **Ground + 5V rails built (2026-11-16):** one Arduino GND -> blue (-) rail
+      (every LED short leg + LCD GND return there); one 5V -> red (+) rail (LCD
+      VCC). Solves the old 3-GND-hole shortage for 5 LEDs + LCD
+- [~] **Stepper fan (PARKED):** 28BYJ-48 + ULN2003 wired as the physical fan on
+      pins 2-5, spins non-blocking mirroring the fan value (commit 887bcec). But
+      the geared motor tops out ~10-15 rpm - too slow. Being replaced by a fast
+      DC motor (DC motor + fan blade + IRF520 MOSFET module), on order
 - [x] 3D room model in Blender (`blender/room_model.py`): open-front cutaway,
       roof, ceiling fan, 2 lamps, wall AC, desk + laptop, TV facing the bed
 
@@ -78,8 +87,9 @@ Last updated: 2026-11-15. Newest live-state pointer: `docs/RESUME.md`.
       ~0.8 s vs Qwen ~20 s, confirms presence, and is the model Chapter 3 specifies
 - [ ] Present the fusion honestly in Chapter 3: pose = presence, VLM = posture
       (draft text in `docs/VLM_vs_Pose.md`)
-- [ ] 4th appliance (AC) and a 4th status LED for presence (empty room = all
-      LEDs off, which looks the same as "system off")
+- [x] **4th + 5th appliances DONE (2026-11-16):** desk lamp (pin 8) and aircond
+      (pin 7) added, so 5 appliances total. (A presence status LED for "empty vs
+      system off" is still optional, not done)
 - [ ] Relay showpiece - LOW-VOLTAGE load only, never mains
 
 ### Dashboard / app (app-monitor, built through PRD Phase 4)

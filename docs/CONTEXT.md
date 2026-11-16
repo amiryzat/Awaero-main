@@ -18,7 +18,7 @@ the open questions. Evidence for every number is in `EVAL_passive_vlm.md`.
     A (active sitting), B (resting), C (unoccupied).
   - Active: hand gestures -> open palm = TV, peace = lights, fist = all-off.
 
-## Current state (2026-11-15)
+## Current state (2026-11-17)
 - **app-monitor** (phone app) works over the USB cable through PRD Phase 4;
   auto-discovery rewritten and installed on the iPhone 17. **Wireless
   phone-to-Mac is a dead end on the borrowed WiFi** (two APs share one
@@ -49,10 +49,32 @@ the open questions. Evidence for every number is in `EVAL_passive_vlm.md`.
 - **Camera:** `camera.py` is PINNED to index 1 (iPhone 12), verified by
   `python camera.py probe`. Name-matching via system_profiler was unreliable.
   It refuses to fall back to the Mac webcam.
-- **LEDs per appliance:** pin 9 light, 10 fan, 11 tv (`FUSED_APP`).
+- **Five appliances (revised 2026-11-16):** pin 9 light, 10 fan, 11 tv, 8 desk
+  lamp, 7 aircond. The LCD runs on the SAME Arduino (`arduino/room_node.ino`, 0x27),
+  no second board. Breadboard holes in `docs/WIRING.md`. The decision policy now
+  follows `FYP_Room_Activity_and_Appliance_Decision_Profiles.md` (see below).
 - **Logging:** `live_log.csv` (or `live_log_moondream.csv`) = the RO3 data
   source for the app. Snapshots per decision; the Moondream runner also saves
   every judged frame + its description.
+
+## THE APPLIANCE POLICY (revised 2026-11-16, from the supervisor's profiles doc)
+Five appliances now, in pin order light, fan, tv, lamp, ac. `FUSED_APP`:
+- A sitting: light ON, fan ON, **TV OFF**, lamp ON, AC ON
+- T standing: light ON, **fan ON**, TV hold, lamp OFF, AC hold
+- B lying: light OFF, fan ON, TV OFF, lamp OFF, AC ON
+- C empty: all OFF
+
+Two deliberate changes from the first prototype, both pinned by selftest so they
+cannot regress: **sitting no longer turns the TV on** (sitting is not proof of
+watching), and **standing no longer turns the fan off** (standing is a transition,
+not a departure). "No change" rows use a HOLD sentinel resolved by `resolve_hold`
+against whatever the appliance is currently doing; T holds TV and AC.
+
+**AC is an ASSUMED policy, not temperature-aware.** There is no temperature sensor,
+and the doc is explicit that AC control must then be described as a configurable
+assumption, never a measured context-aware decision. A DHT11 would make it genuine
+(future work). The desk lamp is a separate appliance from the main light: lamp is
+ON only while sitting, the ceiling light is ON in both T and A.
 
 ## THE PASSIVE-ENGINE DECISION (decided: Moondream)
 Amir chose Moondream on the measured case: equal accuracy to Qwen on the
@@ -67,6 +89,10 @@ evaluated alternative in Chapter 4.
 - Physical build: cardboard model house, the LEDs become labelled appliances,
   extended on female-to-male jumper wires. Everything 5V/USB, never 240V mains.
   A relay with a low-voltage load is optional.
+- Physical fan: a 28BYJ-48 stepper was wired and spins but is too slow (~10-15 rpm,
+  geared); being replaced by a fast plain DC motor (+ IRF520 MOSFET module). The
+  fan value drives the motor, so no protocol change when it is swapped.
+- A spare servo is kept for an optional AC vent flap (opens when AC turns on).
 - 3D room model already done in Blender (`blender/room_model.py`).
 - Present VLM limitations honestly with the measured mitigations.
 
@@ -79,7 +105,10 @@ evaluated alternative in Chapter 4.
 - RO3 still open: end-to-end camera->LED response time per transition, and the
   final Simulated Appliance Activation Reduction figure. (Mandated term; "energy saving performance" and
   "Simulated Energy Reduction" are banned.)
-- Physical model house; 4th appliance + presence status LED when wires arrive.
+- **One full camera->VLM->LED live run with the 5 appliances** - the revised
+  policy has only been driven directly, never through the camera pipeline yet.
+- Fast DC motor swap for the physical fan; optional DHT11 for real AC temperature.
+- Physical model house; optional presence status LED.
 - Chapters 4 and 5.
 
 ## How the user likes to work
@@ -98,7 +127,11 @@ evaluated alternative in Chapter 4.
   `classify_passive.py` (Qwen prompts + offline evaluator), `camera.py`
   (pinned index + probe), `serial_actuator.py`, `arduino/power_leds`.
 - `state_server.py` (JSON API, Trials, serves the dashboard), `web-dashboard/`
-  (React + Vite "Awaero"; spec `web-dashboard/PRD.md`).
+  (React + Vite "Awaero"; spec `web-dashboard/PRD.md`), `awaero-app/` (Expo phone
+  app, same server data, 5 appliances).
+- `docs/WIRING.md` - exact breadboard holes for all 5 appliances + the LCD rails.
+- `FYP_Room_Activity_and_Appliance_Decision_Profiles.md` - the supervisor's spec
+  the revised policy implements.
 - Docs: `PROGRESS.md` (build detail), `CHECKLIST.md` (done vs not),
   `EVAL_passive_vlm.md` (all measurements), `VLM_vs_Pose.md` (thesis framing),
   `HANDOFF.md` (historical hardware handoff).

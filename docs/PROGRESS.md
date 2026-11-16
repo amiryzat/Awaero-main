@@ -1,12 +1,12 @@
 # FYP Progress - Vision-Based Smart Power Management
 
-Last updated: 2026-11-15 (night)
+Last updated: 2026-11-17
 
 ## Status: working end to end, live-tested on the iPhone 12 + Arduino
 
 One entrypoint, `live_system.py`, runs the five-layer pipeline. Pose decides
-presence, a VLM decides posture, gestures override per appliance, and three LEDs
-stand in for the light, fan and TV. The VLM is **Moondream** by default
+presence, a VLM decides posture, gestures override per appliance, and five LEDs
+stand in for the light, fan, TV, desk lamp and aircond. The VLM is **Moondream** by default
 (`moondream_vlm.py`, decided 2026-11-14); `python live_system.py qwen` runs the
 evaluated alternative.
 
@@ -31,15 +31,22 @@ evaluated alternative.
   gates): open palm = TV, peace = light, fist = all off. Each holds the
   appliance it touched for 60 s (`OVERRIDE_SECONDS`) or until the profile
   changes; the overlay shows `[MANUAL Ns]`.
-- **Actuation**: `FUSED_APP` maps the profile to (light, fan, tv) on pins
-  9/10/11 via `serial_actuator.py`.
+- **Actuation**: `FUSED_APP` maps the profile to (light, fan, tv, lamp, ac) on
+  pins 9/10/11/8/7 via `serial_actuator.py` (variadic). The LCD runs on the SAME
+  Arduino (`arduino/room_node.ino`, 0x27); `display_node.py` shares the actuator's
+  open port. Policy follows `FYP_Room_Activity_and_Appliance_Decision_Profiles.md`.
 
-| Profile | Meaning | light | fan | tv |
-|---|---|---|---|---|
-| T | transitional (standing / walking) | ON | off | off |
-| A | active (sitting) | ON | ON | ON |
-| B | resting (lying) | off | ON | off |
-| C | unoccupied | off | off | off |
+| Profile | Meaning | light | fan | tv | lamp | ac |
+|---|---|---|---|---|---|---|
+| T | transitional (standing / walking) | ON | ON | hold | off | hold |
+| A | active (sitting) | ON | ON | off | ON | ON |
+| B | resting (lying) | off | ON | off | off | ON |
+| C | unoccupied | off | off | off | off | off |
+
+Revised 2026-11-16 to the supervisor's profiles doc. Two deliberate reversals from
+the first prototype (pinned by selftest): sitting no longer turns the TV on, and
+standing no longer turns the fan off. "hold" = the doc's "No change" (`resolve_hold`
+keeps whatever the appliance is doing). AC is an ASSUMED policy (no temp sensor).
 
 ## VLM configurations
 | | Qwen (`python live_system.py qwen`) | **Moondream (default)** |
@@ -51,12 +58,20 @@ evaluated alternative.
 | confirms presence | no (too slow) | yes, 10 s window |
 | leaving -> C | 8 s, or never if pose sees phantoms | 10-18 s |
 
-## Hardware
-- Board: Arduino UNO, port `/dev/cu.usbmodem1201`, FQBN `arduino:avr:uno`.
+## Hardware (rebuilt 2026-11-16: 5 appliances + LCD + stepper on ONE Uno)
+- Board: Arduino UNO, port `/dev/cu.usbmodem1101`, FQBN `arduino:avr:uno`.
 - Toolchain: `arduino-cli` (no IDE); Rosetta 2 required for the AVR toolchain.
-- Wiring: pin 9 / 10 / 11 -> 1 kOhm -> LED long leg; short leg -> Arduino GND.
-  Logically: pin 9 = light, 10 = fan, 11 = tv.
-- Firmware: `arduino/power_leds` reads `"a,b,c\n"` at 9600 baud.
+- 5 LEDs: pin 9 light, 10 fan, 11 tv, 8 desk lamp, 7 aircond. Each pin -> 1 kOhm
+  -> LED long leg; short leg -> breadboard blue (-) rail -> one wire to Arduino GND.
+  (One shared ground rail because 5 LEDs + LCD exceed the 3 Arduino GND holes.)
+- LCD: 16x2 I2C at 0x27, GND->blue rail, VCC->red (+) rail (fed from Arduino 5V),
+  SDA->A4, SCL->A5. Same board as the LEDs.
+- Stepper fan (PARKED, too slow): 28BYJ-48 + ULN2003 on pins 2-5, spins when the
+  fan value is on. Being replaced by a fast DC motor + IRF520 MOSFET module.
+- Firmware: `arduino/room_node.ino`. Accepts `"l,f,t,d,a\n"` for the LEDs (variable
+  count; an old `"a,b,c"` still works) and `"top|bottom\n"` for the LCD, at 9600
+  baud. Probes 0x27 at boot and skips LCD calls if none answers, so a missing screen
+  never hangs the LEDs. Exact breadboard holes: `docs/WIRING.md`.
 
 ## Key files
 - `live_system.py` - main entrypoint. Pure logic (`decide_mode`, `fuse_label`,
@@ -107,8 +122,8 @@ so they don't share the GPU (`ollama stop qwen3-vl:4b`).
 
 ## Re-flash firmware (only if changed)
 ```bash
-arduino-cli compile --fqbn arduino:avr:uno arduino/power_leds
-arduino-cli upload -p /dev/cu.usbmodem1201 --fqbn arduino:avr:uno arduino/power_leds
+arduino-cli compile --fqbn arduino:avr:uno arduino/room_node
+arduino-cli upload -p /dev/cu.usbmodem1101 --fqbn arduino:avr:uno arduino/room_node
 ```
 
 ## Environment
@@ -118,6 +133,24 @@ arduino-cli upload -p /dev/cu.usbmodem1201 --fqbn arduino:avr:uno arduino/power_
   ("Amvx") excluded.
 
 ## Session log
+- **2026-11-17**: Awaero phone app built (`awaero-app/`, a copy of app-monitor,
+  `com.amiryzat.awaero`) carrying the same server data as the web dashboard, 5
+  appliances, Trials tab, real accuracy. Fixed `state_server.py` to serve camera
+  frames as `no-cache` (React Native's image loader rejects `no-store`), which also
+  fixes the old app. Restarted the stale server (it predated the 5-appliance change).
+  Commits f50dfe9, 8ab027d. Full handoff: `awaero-app/PROGRESS.md`.
+- **2026-11-16**: Hardware day - 3 appliances -> 5. Wired light/fan/tv/desk-lamp/
+  aircond LEDs (pins 9/10/11/8/7), each tested lit; built a shared blue (-) ground
+  rail + red (+) 5V rail. Moved the LCD onto the SAME Arduino (`arduino/room_node.ino`,
+  0x27) - the old "random symbols" was an uninitialised screen (firmware hung probing
+  a missing LCD; now it probes 0x27 and skips LCD calls when absent). Rewrote
+  `FUSED_APP` to the supervisor's profiles doc (TV off when sitting, fan held when
+  standing, lamp + AC added, HOLD sentinel via `resolve_hold`, AC an assumed policy).
+  Fixed the activation-reduction metric to count only appliances a log recorded (an
+  absent column was a 100% false saving). Wired a 28BYJ-48 stepper as the physical
+  fan (non-blocking) but parked it as too slow. `serial_actuator.set()` variadic;
+  `display_node` shares the actuator port. All selftests pass; dashboard shows 5.
+  Commits 4078b76, 3ff8338, 03adf11, 887bcec, 909efa3, ff173fb. Holes: `docs/WIRING.md`.
 - **2026-11-15 (night)**: web-dashboard UI session, `web-dashboard/` only (no FYP
   Python changed). Web-first layout (>=900px left sidebar with icons; below that
   the topbar + rubber bottom tab bar). Live camera preview at native aspect.
@@ -179,6 +212,10 @@ arduino-cli upload -p /dev/cu.usbmodem1201 --fqbn arduino:avr:uno arduino/power_
 - **2026-11-10**: Arduino LED actuation built and wired (`HANDOFF.md`).
 
 ## Next
+- **One full camera->VLM->LED live run with the 5 appliances** - the revised policy
+  has only been driven directly, not yet through the camera pipeline. Launch
+  `live_system.py` TRACKED so the whole run can be analysed.
+- Fast DC motor swap for the physical fan (DC motor + fan blade + IRF520 module).
 - The three live-run fixes are DONE + validated. RO3 postures AND gestures now have
   >=10 trials each (A 11, T 12, B 10, C 10, open_palm 12, peace 12, fist 10).
 - End-to-end camera->LED response time table per transition: per-trial `vlm_latency_s`

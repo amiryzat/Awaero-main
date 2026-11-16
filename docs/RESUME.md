@@ -2,7 +2,7 @@
 
 Newest-state pointer for a new chat. Read this first, then `CHECKLIST.md`
 (what is built vs not), `CONTEXT.md` (decisions), `PROGRESS.md` (build state).
-Last updated: 2026-11-16 (night, after the Awaero phone-app session).
+Last updated: 2026-11-17 (after the 5-appliance hardware build + the Awaero phone-app session).
 
 ## One-line status
 Dashboard + Trials recorder BUILT. The three live-run fixes are BUILT and
@@ -10,6 +10,54 @@ VALIDATED in a second run. **Before: 73 trials, 94.5%. After: 77 trials, 89.6%
 raw -> A & B both now 100% (were 90/80), and 98.0% (50/51) once operator timing
 settled.** The before/after is the Chapter 4 story. Next = writing + the
 per-transition latency table.
+**Hardware now: 5 appliances (light, fan, tv, desk lamp, aircond) + the LCD on
+ONE Arduino, all tested; the decision policy was rewritten to the supervisor's
+profiles doc.** Not yet done: a full camera->VLM->LED run with the 5 appliances.
+
+## What happened 2026-11-16 (day): 5 appliances + LCD on one Arduino + new policy
+The prototype went from 3 appliances to 5, the LCD moved onto the SAME Arduino as
+the LEDs, and the decision policy was rewritten to
+`FYP_Room_Activity_and_Appliance_Decision_Profiles.md`. Breadboard holes are all
+recorded in the new `docs/WIRING.md`. Commits 4078b76, 3ff8338, 03adf11, 887bcec,
+909efa3, ff173fb.
+- **5 appliance LEDs**, wired and each tested lit: pin 9 light, 10 fan, 11 tv,
+  **8 desk lamp, 7 aircond**. One Arduino GND feeds a blue (-) rail every LED short
+  leg returns to; 5V feeds a red (+) rail for the LCD. (Closes the old GND-hole
+  shortage item.)
+- **LCD on the SAME Arduino** (`arduino/room_node.ino`), working at 0x27, no second
+  board. The old "random symbols / boxes" was NOT an LCD fault: the firmware hung in
+  setup() probing a not-yet-wired screen, which looked like dead LEDs. It now probes
+  0x27 and skips every LCD call if nothing answers, so a missing screen never blocks
+  the LEDs. `display_node.py` can share the actuator's open port
+  (`LcdDisplay(ser=act.ser)`); `serial_actuator.set()` is variadic.
+- **New 5-appliance policy** (`FUSED_APP`). Two deliberate reversals from the first
+  prototype, both pinned by selftests: sitting (A) no longer turns the TV ON, and
+  standing (T) no longer turns the fan OFF. The doc's "No change" rows use a HOLD
+  sentinel (`resolve_hold`); T holds TV and AC. Desk lamp is ON only while sitting.
+  **AC is an ASSUMED policy, NOT temperature-aware** (no sensor) - the writing must
+  say so; a DHT11 later would make it genuine.
+
+  | Profile | light | fan | tv | lamp | ac |
+  |---|---|---|---|---|---|
+  | A sitting | ON | ON | OFF | ON | ON |
+  | T standing | ON | ON | hold | OFF | hold |
+  | B lying | OFF | ON | OFF | OFF | ON |
+  | C empty | OFF | OFF | OFF | OFF | OFF |
+
+- **Activation-reduction metric fixed** (`state_server.py`): it now counts only
+  appliances a log ACTUALLY recorded. An absent lamp/ac column was scored as "off
+  the whole time" = a 100% saving for an appliance that never ran in that log, which
+  would have inflated the headline Chapter 4 figure. Selftest added.
+- **Stepper fan (PARKED)**: a 28BYJ-48 + ULN2003 was wired as the physical fan on
+  pins 2-5 and spins (non-blocking, mirrors the fan value), but the geared motor
+  tops out ~10-15 rpm - too slow to read as a fan. Owner is buying a fast DC motor
+  (DC motor + fan blade + IRF520 MOSFET module) to replace it. Firmware kept as a
+  working base (commit 887bcec).
+- **Dashboard** shows all 5 (Home tiles, Live stage, Stats bars iterate whatever the
+  server reports). Verified on real hardware: A lit light+fan+lamp+ac with the TV
+  dark; T held AC through the transition; B dropped to fan+ac; C dark.
+- **Still NOT done**: no full camera -> VLM -> LED run with 5 appliances yet (we only
+  drove the LEDs directly). That live run is the next thing to verify.
 
 ## What happened 2026-11-16 (night): the Awaero phone app
 - **New phone app `awaero-app/`, named Awaero** (`com.amiryzat.awaero`). It is a
@@ -126,7 +174,9 @@ The dashboard got a full UI pass. No FYP Python changed in this session, only
   when no VLM answer. FUSED_APP is authoritative.
 
 ## NEXT STEP
-All three fixes are done + validated. The remaining work is WRITING, not code:
+**First: one full camera->VLM->LED live run with the 5 appliances** - the new policy
+has only been driven directly, never through the camera pipeline yet. Then the fast
+DC motor swap when it arrives. After that it is WRITING, not code:
 - Chapter 4: the before/after (94.5% -> A&B 100%, 98% settled) + the T-lag tradeoff.
 - The per-transition camera->LED wall-clock latency table (per-trial `vlm_latency_s`
   + decide/actuate are logged; still need the transition table).
@@ -155,7 +205,9 @@ in) would land near 98%, but the 77-trial set is honest and usable as-is.
   when the Continuity Camera slept). See memory `feedback-live-test-tracked`.
 - Resume this chat if VS Code closes: `claude --continue` (or `claude --resume`).
 
-## LCD note
-`lcd_scroll.py` added (scroll a message across the LCD top line; close live_system.py
-first - one program per display board). LCD random-symbols issue still open; suspect
-power/brown-out, fix = double lcd.init(). LEDs + app are the real actuation, not blocking.
+## LCD note (RESOLVED 2026-11-16)
+The LCD works at 0x27 on the SAME Arduino as the LEDs, via `arduino/room_node.ino`.
+The old "random symbols / boxes" was an UNINITIALISED screen: the firmware hung in
+setup() probing a missing LCD, so nothing drove it. It now probes 0x27 first and
+skips all LCD calls when absent, so the LEDs never hang. The two-board `lcd_scroll.py`
+util is superseded by the shared-port path (`LcdDisplay(ser=act.ser)`).
