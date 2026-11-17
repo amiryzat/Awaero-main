@@ -56,6 +56,21 @@ Four activities, each the ground-truth label of a captured frame:
   JPEG, is not a duplicate, and reports the per-label counts. Invalid rows are
   dropped and listed; the warnings are recorded in the findings.
 
+## Prompt choice (and a finding in its own right)
+Both models get `"Describe the people in this image."` - plural, with no "what
+are they doing?" demand and no presupposition that a person exists.
+
+This was NOT the first choice, and the reason is a finding worth a sentence in
+Chapter 4. The first clean run used `"Describe THE PERSON in this image and what
+they are doing."` Because that prompt **presupposes a person**, the small model
+(Moondream) **hallucinated a person in every empty-room frame** ("there is a
+person sitting at a desk using a laptop") and scored 0/10 on UNOCCUPIED - while
+the larger model (Qwen) ignored the false premise and read the empty room
+correctly. Swapping to the plural, non-presuppositional prompt removed the bias
+and both models read empty rooms correctly. So: a leading prompt corrupts a
+small VLM's output and the measurement; the instrument had to be validated, not
+assumed. The numbers reported are from the neutral prompt.
+
 ## What is logged (every finding)
 `eval_two_models_findings.md` (generated) records:
 - dataset counts per activity + any data warnings;
@@ -92,6 +107,9 @@ python eval_two_models.py selftest # scoring logic only (no models)
 - Single room, single occupant; the set reflects this room's scene, not every
   bedroom-study.
 - Offline latency != deployed latency (no GPU contention here).
+- The result is prompt-sensitive, especially for the smaller model (see "Prompt
+  choice" above); the neutral prompt is the one reported, and the sensitivity is
+  itself reported rather than hidden.
 - The parser is a keyword rule over free-text descriptions; a model could read
   the scene correctly yet phrase it in words the parser misses. The unparsed
   count and the per-frame descriptions make that failure visible rather than

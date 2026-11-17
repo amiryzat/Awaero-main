@@ -36,7 +36,11 @@ FINDINGS_MD = "eval_two_models_findings.md"
 ACTIVITIES = ["STUDYING", "RESTING", "TRANSITIONAL", "UNOCCUPIED"]
 MIN_PER_LABEL = 10         # RO-style target; below this a path's % is not trustworthy
 
-PROMPT = "Describe the person in this image and what they are doing."
+# "Describe the people in this image." - plural, no "what are they doing" demand.
+# Proven NON-hallucinating on empty rooms (Moondream 41/41 empties historically);
+# the descriptions still include posture + context ("sitting at a desk using a
+# laptop"), which is what the parser needs. Same prompt for both = fair.
+PROMPT = "Describe the people in this image."
 # Qwen3-VL reasons before it answers and the reasoning consumes num_predict, so
 # a small cap returns EMPTY content (classify_passive.py warns of this). Both
 # models get an ample, identical budget; Moondream simply stops early.
