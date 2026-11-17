@@ -16,27 +16,38 @@ Four activities, aligned 1:1 with the Capture labels:
 Pure text. No model, no camera. `python scene_activity.py selftest`.
 """
 
+import re
 import sys
 
 # A bedroom-study has a bed in frame even while the person is at the desk, so
 # "bed" alone must NOT mean resting - it only counts when nobody is clearly
 # sitting. Order of checks below handles that.
 PERSON = ("person", "man", "woman", "boy", "girl", "people", "someone",
-          "individual", "guy", "figure", "he ", "she ")
+          "individual", "guy", "figure", "he", "she")
 NO_PERSON = ("no person", "no one", "no people", "nobody", "not occupied",
              "unoccupied", "empty room", "no visible", "there are no")
 DESK = ("desk", "laptop", "computer", "keyboard", "monitor", "working", "studying")
-LIE = ("lying", "laying", "lie ", "lies ", "reclin", "asleep", "sleeping")
+# Whole words only (below): "laying" must NOT fire inside "playing a video game",
+# and "lie" must not fire inside "believe" - a substring match got both wrong.
+LIE = ("lying", "laying", "lie", "lies", "reclining", "reclined", "asleep", "sleeping")
 BED = ("bed", "couch", "sofa", "mattress")
-SIT = ("sitting", "seated", "sits ", "is sat")
-STAND = ("standing", "stands ", "walking", "walks ", "is stood")
+SIT = ("sitting", "seated", "sits")
+STAND = ("standing", "stands", "walking", "walks")
 
 LABEL_TO_ACTIVITY = {"studying": "STUDYING", "resting": "RESTING",
                      "standing": "TRANSITIONAL", "empty": "UNOCCUPIED"}
 
 
 def _has(text, words):
-    return any(w in text for w in words)
+    """Whole-word match for single words (so 'laying' does not hit 'playing'),
+    plain substring for multi-word phrases like 'no person'."""
+    for w in words:
+        if " " in w:
+            if w in text:
+                return True
+        elif re.search(r"\b" + re.escape(w) + r"\b", text):
+            return True
+    return False
 
 
 def present(text):
@@ -93,6 +104,11 @@ def _selftest():
         # tricky: sitting person while a bed is in frame must stay STUDYING
         ("A woman is sitting at her desk typing, with a bed behind her.",
          "STUDYING", True),
+        # regression: 'playing' must not match 'laying', 'believe' not 'lie'
+        ("A person sitting at a desk playing a video game with a controller; a "
+         "bed is visible in the background.", "STUDYING", True),
+        ("A person is standing; I believe they are near the desk.",
+         "TRANSITIONAL", True),
         # standing but a desk is in the room: still transitional, lamp decision
         # later uses at_desk, but the activity is standing
         ("A person standing next to the desk.", "TRANSITIONAL", True),

@@ -37,7 +37,10 @@ ACTIVITIES = ["STUDYING", "RESTING", "TRANSITIONAL", "UNOCCUPIED"]
 MIN_PER_LABEL = 10         # RO-style target; below this a path's % is not trustworthy
 
 PROMPT = "Describe the person in this image and what they are doing."
-EVAL_OPTIONS = {"temperature": 0.0, "num_predict": 96}
+# Qwen3-VL reasons before it answers and the reasoning consumes num_predict, so
+# a small cap returns EMPTY content (classify_passive.py warns of this). Both
+# models get an ample, identical budget; Moondream simply stops early.
+EVAL_OPTIONS = {"temperature": 0.0, "num_predict": 512}
 
 
 def engines():
@@ -45,7 +48,7 @@ def engines():
     import classify_passive
     return [
         ("Moondream", moondream_vlm.MODEL, None),    # not a thinking model
-        ("Qwen", classify_passive.MODEL, False),     # thinking off: plain description
+        ("Qwen", classify_passive.MODEL, None),      # default: content comes after its reasoning
     ]
 
 
