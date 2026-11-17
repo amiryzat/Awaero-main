@@ -40,8 +40,14 @@ Built this session (Phase 1 - no hardware needed, all selftested, committed):
   GET /eval/<file>.
 - Method written up in `docs/EVAL_two_models.md` (Chapter 4 draws from it).
 
-**Next:** capture >=10 frames per activity from the phone, review them, run
-`python eval_two_models.py`, read the findings. Then wire the winning engine's
+**A/B RESULT (2026-11-17, n=40 reviewed frames): Moondream 97.5% vs Qwen 92.5%,
+and Moondream ~7x faster (1.9s vs 12.9s mean) -> use Moondream.** Found+fixed 3
+measurement bugs + a prompt-bias confound + a data-labelling error first (the
+instrument was validated). Numbers: `eval_two_models_findings.md`; method:
+`docs/EVAL_two_models.md`. `eval_two_models.py rescore` re-parses saved
+descriptions with the current parser (no model calls).
+
+**Next:** wire Moondream's activity->appliance logic (desk lamp at desk only). Then wire the winning engine's
 activity->appliance logic + the two gestures, tag trials by engine, and do the
 two live runs. DHT22 for temperature-based AC when it arrives.
 

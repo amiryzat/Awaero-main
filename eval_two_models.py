@@ -247,6 +247,36 @@ def write_findings_md(path, counts, summary, names, agree, disagree, warnings):
         f.write("\n".join(L))
 
 
+def rescore():
+    """Re-parse the SAVED descriptions in RESULTS_CSV with the current parser and
+    regenerate the findings - no model calls. Valid because the model outputs are
+    fixed; only the interpretation rule changed (e.g. a parser fix)."""
+    if not os.path.exists(RESULTS_CSV):
+        raise SystemExit(f"No {RESULTS_CSV} to rescore. Run the eval first.")
+    by_file = {}
+    for r in csv.DictReader(open(RESULTS_CSV)):
+        fr = by_file.setdefault(r["file"], {"file": r["file"], "true": r["true"],
+                                            "preds": {}, "descs": {}, "lats": {}})
+        fr["preds"][r["engine"]] = scene_activity.activity(r["description"])
+        fr["descs"][r["engine"]] = r["description"]
+        fr["lats"][r["engine"]] = float(r["latency_s"] or 0)
+    per_frame = list(by_file.values())
+    names = sorted({e for fr in per_frame for e in fr["preds"]})
+    counts = {}
+    for fr in per_frame:
+        for label, act in LABEL_TO_ACTIVITY.items():
+            if fr["true"] == act:
+                counts[label] = counts.get(label, 0) + 1
+    summary = summarise(to_records(per_frame, names), names)
+    agree, disagree = agreement(per_frame, names)
+    write_results_csv(per_frame, names, RESULTS_CSV)
+    write_findings_md(FINDINGS_MD, counts, summary, names, agree, disagree, [])
+    for name in names:
+        s = summary[name]
+        print(f"{name:10s} {s['correct']}/{s['n']} = {s['pct']}%")
+    print(f"agreement {agree}%  (rescored from saved descriptions, no model calls)")
+
+
 def main():
     manifest = os.path.join(EVAL_DIR, "labels.csv")
     if not os.path.exists(manifest):
@@ -324,5 +354,7 @@ def _selftest():
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "selftest":
         _selftest()
+    elif len(sys.argv) > 1 and sys.argv[1] == "rescore":
+        rescore()
     else:
         main()

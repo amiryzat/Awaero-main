@@ -73,7 +73,7 @@ def interpret(description):
 
     # Lying beats the rest, but only when the person is not clearly sitting
     # (otherwise "sitting ... next to a bed" would read as resting).
-    if _has(t, LIE) or (_has(t, BED) and not sitting and not at_desk):
+    if _has(t, LIE) or (_has(t, BED) and not sitting and not at_desk and not _has(t, STAND)):
         return "RESTING", {"present": True, "at_desk": False, "posture": "lie"}
     if _has(t, STAND) and not sitting:
         return "TRANSITIONAL", {"present": True, "at_desk": at_desk, "posture": "stand"}
@@ -112,6 +112,9 @@ def _selftest():
         # standing but a desk is in the room: still transitional, lamp decision
         # later uses at_desk, but the activity is standing
         ("A person standing next to the desk.", "TRANSITIONAL", True),
+        # a mattress/bed in the scene must not beat an explicit 'standing'
+        ("A young man is standing on a green mattress in the room.",
+         "TRANSITIONAL", False),
     ]
     for desc, want_act, want_desk in cases:
         act, detail = interpret(desc)

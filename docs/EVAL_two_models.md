@@ -115,11 +115,25 @@ python eval_two_models.py selftest # scoring logic only (no models)
   count and the per-frame descriptions make that failure visible rather than
   silent.
 
-## Results
-_Run the eval, then read `eval_two_models_findings.md`. Summarise the headline
-here once the set is captured:_
+## Results (2026-11-17, n=40, neutral prompt)
+Dataset: 40 reviewed frames (studying/resting/standing/empty = 10/10/10/10).
 
-- Dataset: _N frames (studying/resting/standing/empty = .../.../.../...)_
-- Moondream: _..%_ overall · Qwen: _..%_ overall
-- Agreement: _..%_ ; notable disagreements: _..._
-- Decision: _which engine, and why_
+| model | overall | STUDYING | RESTING | TRANSITIONAL | UNOCCUPIED | latency mean/max |
+|---|---|---|---|---|---|---|
+| **Moondream** | **97.5%** (39/40) | 90% | 100% | 100% | 100% | **1.9s** / 3.1s |
+| **Qwen3-VL 4b** | **92.5%** (37/40) | 100% | 100% | 70% | 100% | 12.9s / 24.0s |
+
+- **Decision: Moondream.** It is both MORE accurate (97.5% vs 92.5%) and ~**7x
+  faster** (1.9s vs 12.9s mean) on this activity task, which justifies the
+  deployed choice rather than just asserting it.
+- Qwen's one weakness is TRANSITIONAL (70%): it reads a person standing AT the
+  desk as sitting/working (context over posture). Moondream's single miss is a
+  genuinely ambiguous frame (person at the desk holding a phone - standing vs
+  sitting is unclear even to a human).
+- Agreement 90% (4/40 disagreements, all inspected and genuine).
+- Validity: three measurement bugs were found and fixed before this run (Qwen
+  token budget, parser word-boundaries, parser bed-vs-standing) plus a
+  prompt-bias confound and a data-labelling error - the instrument was validated,
+  not assumed. See the commit history and the "Prompt choice" section.
+- Caveats: n=40, single room / single occupant; offline latency (no GPU
+  contention) is a lower bound, not the deployed figure - the live A/B measures that.
