@@ -174,6 +174,11 @@ FRAME_PATH = "live_frame.jpg"   # latest annotated frame, relayed to the phone a
 FRAME_TMP = "live_frame.tmp.jpg"
 RAW_PATH = "live_raw.jpg"        # latest CLEAN frame (no overlays) for eval capture
 RAW_TMP = "live_raw.tmp.jpg"
+# The Mac preview window is the ONLY way to quit (press q). For phone-driven
+# capture sessions that is a liability - a stray q or a closed window ends the
+# run. `headless` skips the window; the phone still sees the feed via /frame.jpg,
+# and the run is stopped by killing the process.
+SHOW_WINDOW = True
 FRAME_EVERY = 0.5               # seconds between writes; also the app's heartbeat
 SNAP_DIR = "snapshots"   # one annotated frame per decision: debugging evidence,
                          # and a labelled figure per response path for Chapter 4
@@ -733,18 +738,19 @@ def main():
                 if cv2.imwrite(RAW_TMP, small_raw, [cv2.IMWRITE_JPEG_QUALITY, 90]):
                     os.replace(RAW_TMP, RAW_PATH)
 
-            cv2.imshow("live integrated system", frame)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
-                break
-            if ord("0") <= key <= ord("9"):
-                idx = key - ord("0")
-                if idx not in camera.allowed_indices():
-                    print(f"Camera index {idx} not available; staying put.")
-                else:
-                    cap.release()
-                    cap = cv2.VideoCapture(idx)
-                    print(f"Switched to camera index {idx}.")
+            if SHOW_WINDOW:
+                cv2.imshow("live integrated system", frame)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
+                    break
+                if ord("0") <= key <= ord("9"):
+                    idx = key - ord("0")
+                    if idx not in camera.allowed_indices():
+                        print(f"Camera index {idx} not available; staying put.")
+                    else:
+                        cap.release()
+                        cap = cv2.VideoCapture(idx)
+                        print(f"Switched to camera index {idx}.")
 
     shared["stop"] = True
     lcd.close()
@@ -884,10 +890,13 @@ def _selftest():
 
 
 if __name__ == "__main__":
-    arg = sys.argv[1] if len(sys.argv) > 1 else ""
-    if arg == "selftest":
+    args = sys.argv[1:]
+    if "selftest" in args:
         _selftest()
     else:
-        if arg == "qwen":
+        if "qwen" in args:
             use_qwen()
+        if "headless" in args:
+            SHOW_WINDOW = False       # no preview window: can't be q-quit or closed
+            print("headless: no preview window; stop with Ctrl-C or by killing the process")
         main()
