@@ -163,7 +163,10 @@ LOG_FIELDS = ["time", "mode", "people", "pose", "vlm", "phone", "vlm_latency_s",
               # it is NOT time-until-the-LED-changes. Reporting it as end-to-end
               # actuation would overstate the measurement; an Arduino ack would
               # be needed for that.
-              "decide_latency_ms", "actuate_latency_ms"]
+              "decide_latency_ms", "actuate_latency_ms",
+              # desk lamp + aircond, appended at the very end so the column order
+              # every existing log and parser already relies on does not shift.
+              "lamp", "ac"]
 FRAME_PATH = "live_frame.jpg"   # latest annotated frame, relayed to the phone app
 # Written here first, then renamed, so the server never serves a half-written
 # file. It must keep the .jpg extension: OpenCV picks its encoder from that, and
@@ -828,11 +831,13 @@ def _selftest():
     assert ask is classify_passive.ask and parse_label is classify_passive.parse_label
     assert PRESENCE_CONFIRM_SECONDS is None and VLM_MIN_INTERVAL == 3.0
 
-    # RO3 latency instrumentation: the two fields go at the END of the header so
-    # a parser reading by column index keeps working on older logs.
-    assert LOG_FIELDS[-2:] == ["decide_latency_ms", "actuate_latency_ms"]
+    # Column order the dashboard + older parsers rely on: first 11 fixed, then
+    # the latency fields, then lamp/ac appended LAST (5-appliance logging, so a
+    # 3-appliance parser reading light/fan/tv by index still works).
     assert LOG_FIELDS[:11] == ["time", "mode", "people", "pose", "vlm", "phone",
                                "vlm_latency_s", "profile", "light", "fan", "tv"]
+    assert LOG_FIELDS[-2:] == ["lamp", "ac"]
+    assert {"decide_latency_ms", "actuate_latency_ms"} <= set(LOG_FIELDS)
     calls = []
     ms = timed_set(type("A", (), {"set": lambda self, *a: calls.append(a)})(), [1, 0, 1])
     assert calls == [(1, 0, 1)] and isinstance(ms, float) and ms >= 0
