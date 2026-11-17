@@ -17,6 +17,8 @@ app-monitor/
 archive/
 snapshots/
 live_frame.jpg
+live_raw.jpg
+eval_frames/
 trials.csv
 
 # Local agent/skill tooling (boardui, emilkowalski skills) - not part of the FYP

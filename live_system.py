@@ -172,6 +172,8 @@ FRAME_PATH = "live_frame.jpg"   # latest annotated frame, relayed to the phone a
 # file. It must keep the .jpg extension: OpenCV picks its encoder from that, and
 # a plain ".tmp" makes imwrite fail.
 FRAME_TMP = "live_frame.tmp.jpg"
+RAW_PATH = "live_raw.jpg"        # latest CLEAN frame (no overlays) for eval capture
+RAW_TMP = "live_raw.tmp.jpg"
 FRAME_EVERY = 0.5               # seconds between writes; also the app's heartbeat
 SNAP_DIR = "snapshots"   # one annotated frame per decision: debugging evidence,
                          # and a labelled figure per response path for Chapter 4
@@ -455,6 +457,7 @@ def main():
             frame = enhance_if_dark(frame)   # rescue dark rooms
             now = time.time()
             h, w = frame.shape[:2]
+            raw_frame = frame.copy()         # clean, before any overlay (eval capture)
 
             # DETECTION runs on a downscaled copy to leave GPU for Ollama; the
             # DISPLAY keeps full resolution. Shrinking the displayed frame made
@@ -723,6 +726,12 @@ def main():
                          if w > PROC_WIDTH else frame)
                 if cv2.imwrite(FRAME_TMP, small, [cv2.IMWRITE_JPEG_QUALITY, 70]):
                     os.replace(FRAME_TMP, FRAME_PATH)
+                # clean frame (no overlays) at higher quality, for on-demand eval
+                # capture from the web app (state_server serves /capture from it).
+                small_raw = (cv2.resize(raw_frame, (PROC_WIDTH, int(h * PROC_WIDTH / w)))
+                             if w > PROC_WIDTH else raw_frame)
+                if cv2.imwrite(RAW_TMP, small_raw, [cv2.IMWRITE_JPEG_QUALITY, 90]):
+                    os.replace(RAW_TMP, RAW_PATH)
 
             cv2.imshow("live integrated system", frame)
             key = cv2.waitKey(1) & 0xFF

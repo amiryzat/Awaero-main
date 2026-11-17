@@ -4,6 +4,7 @@ import Home from "./ui/Home";
 import Live from "./ui/Live";
 import Stats from "./ui/Stats";
 import Trials, { LABELS } from "./ui/Trials";
+import Capture from "./ui/Capture";
 import RubberSegment from "./ui/RubberSegment";
 import TechText from "./ui/TechText";
 import { isSignedIn, signOut } from "./lib/session";
@@ -16,7 +17,7 @@ export default function App() {
   return <Dashboard onSignOut={() => { signOut(); setSignedIn(false); }} />;
 }
 
-type Tab = "home" | "live" | "stats" | "trials";
+type Tab = "home" | "live" | "stats" | "trials" | "capture";
 
 // Line icons for the web sidebar. Inline SVG, no icon dependency.
 const svg = {
@@ -28,12 +29,14 @@ const HomeIcon = () => (<svg {...svg}><path d="M3 10.5 12 3l9 7.5" /><path d="M5
 const LiveIcon = () => (<svg {...svg}><rect x="3" y="6" width="13" height="12" rx="2" /><path d="M16 10l5-3v10l-5-3" /></svg>);
 const StatsIcon = () => (<svg {...svg}><path d="M5 21V10" /><path d="M12 21V4" /><path d="M19 21v-7" /></svg>);
 const TrialsIcon = () => (<svg {...svg}><path d="M9 11l3 3 8-8" /><path d="M21 12a9 9 0 1 1-6.2-8.6" /></svg>);
+const CaptureIcon = () => (<svg {...svg}><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>);
 
 const NAV: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "home", label: "Home", icon: <HomeIcon /> },
   { id: "live", label: "Live", icon: <LiveIcon /> },
   { id: "stats", label: "Stats", icon: <StatsIcon /> },
   { id: "trials", label: "Trials", icon: <TrialsIcon /> },
+  { id: "capture", label: "Capture", icon: <CaptureIcon /> },
 ];
 
 function Dashboard({ onSignOut }: { onSignOut: () => void }) {
@@ -103,6 +106,7 @@ function Dashboard({ onSignOut }: { onSignOut: () => void }) {
         {tab === "trials" && (
           <Trials state={state} delay={delay} setDelay={setDelay} pending={pending} onArm={arm} />
         )}
+        {tab === "capture" && <Capture />}
       </div>
 
       <footer

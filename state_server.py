@@ -35,6 +35,10 @@ EVAL_PATH = os.path.join(HERE, "classify_results.csv")
 FRAME_PATH = os.path.join(HERE, "live_frame.jpg")   # written by live_system.py
 DIST = os.path.join(HERE, "web-dashboard", "dist")  # the built web dashboard (PRD 6.2)
 TRIALS_PATH = os.path.join(HERE, "trials.csv")      # written by the Trials recorder (RO3)
+RAW_PATH = os.path.join(HERE, "live_raw.jpg")       # CLEAN frame, written by live_system.py
+EVAL_DIR = os.path.join(HERE, "eval_frames")        # captured labelled frames for the VLM A/B
+EVAL_LABELS = os.path.join(EVAL_DIR, "labels.csv")  # manifest: file,label,time
+CAPTURE_LABELS = ("studying", "resting", "standing", "empty")
 
 STALE_SECONDS = 30            # newest row older than this -> not online
 SESSION_GAP_SECONDS = 30 * 60  # a gap this long, or time going backwards, splits sessions
@@ -277,6 +281,48 @@ def trials_report(path=TRIALS_PATH):
             "overall": _summ(rows), "per_path": {k: v for k, v in per.items() if v}}
 
 
+def capture_counts(path=None):
+    """Frames captured per label, read from the manifest (0 for a missing file)."""
+    counts = {k: 0 for k in CAPTURE_LABELS}
+    try:
+        with open(path or EVAL_LABELS, newline="") as f:
+            for row in csv.DictReader(f):
+                if row.get("label") in counts:
+                    counts[row["label"]] += 1
+    except FileNotFoundError:
+        pass
+    return counts
+
+
+def save_capture(label, raw_path=None, eval_dir=None):
+    """Save the current CLEAN camera frame (live_raw.jpg) under `label` into
+    eval_frames/ and append to the manifest. Returns {saved, counts}, or
+    {error} if the label is unknown or the camera is not live. Writes ONLY under
+    eval_frames/ - never live_log.csv (that stays live_system.py's alone)."""
+    if label not in CAPTURE_LABELS:
+        return {"error": "label must be one of %s" % (CAPTURE_LABELS,)}
+    raw_path = raw_path or RAW_PATH
+    eval_dir = eval_dir or EVAL_DIR
+    try:
+        if time.time() - os.path.getmtime(raw_path) > FRAME_FRESH_SECONDS:
+            return {"error": "camera not live - start live_system.py"}
+    except OSError:
+        return {"error": "camera not live - start live_system.py"}
+    os.makedirs(eval_dir, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M%S") + "_%03d" % (int(time.time() * 1000) % 1000)
+    name = "%s_%s.jpg" % (label, stamp)
+    with open(raw_path, "rb") as src, open(os.path.join(eval_dir, name), "wb") as dst:
+        dst.write(src.read())
+    manifest = os.path.join(eval_dir, "labels.csv")
+    new = not os.path.exists(manifest)
+    with open(manifest, "a", newline="") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(["file", "label", "time"])
+        w.writerow([name, label, time.strftime("%Y-%m-%d %H:%M:%S")])
+    return {"saved": name, "counts": capture_counts(manifest)}
+
+
 def record_trial(expected):
     """Snapshot the live decision now and score it against the declared label."""
     cur = (SRC.state().get("current") or {}) if SRC else {}
@@ -432,13 +478,18 @@ class Handler(BaseHTTPRequestHandler):
         self._send(204, b"", "text/plain")
 
     def do_POST(self):
-        if urlparse(self.path).path != "/trials":
+        path = urlparse(self.path).path
+        if path not in ("/trials", "/capture"):
             return self._send(404, {"error": "not found"})
         try:
             n = int(self.headers.get("Content-Length") or 0)
-            expected = str(json.loads(self.rfile.read(n) or b"{}").get("expected", "")).strip()
+            body = json.loads(self.rfile.read(n) or b"{}")
         except (ValueError, json.JSONDecodeError):
             return self._send(400, {"error": "bad json"})
+        if path == "/capture":
+            res = save_capture(str(body.get("label", "")).strip())
+            return self._send(400 if "error" in res else 200, res)
+        expected = str(body.get("expected", "")).strip()
         if expected not in TRIAL_PATHS:
             return self._send(400, {"error": "expected must be one of %s" % (TRIAL_PATHS,)})
         self._send(200, record_trial(expected))
@@ -466,6 +517,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, SRC.metrics(q.get("window", ["session"])[0]))
         elif url.path == "/trials":
             self._send(200, trials_report())
+        elif url.path == "/capture":
+            self._send(200, {"counts": capture_counts(),
+                             "live": frame_fresh(), "labels": list(CAPTURE_LABELS)})
         elif url.path == "/frame.jpg":
             if not frame_fresh():
                 return self._send(404, {"error": "no live frame"})
@@ -653,6 +707,24 @@ def _selftest():
     _selftest_mixed()
     _selftest_midnight()
     _selftest_trials()
+    _selftest_capture()
+
+
+def _selftest_capture():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        raw = os.path.join(d, "live_raw.jpg")
+        ev = os.path.join(d, "eval_frames")
+        assert "error" in save_capture("sitting", raw, ev)            # bad label rejected
+        assert "error" in save_capture("studying", raw, ev)           # no frame -> not live
+        with open(raw, "wb") as f:
+            f.write(b"\xff\xd8\xff\xd9")                            # a tiny fake jpeg, fresh
+        r = save_capture("studying", raw, ev)
+        assert r.get("saved", "").startswith("studying_") and r["counts"]["studying"] == 1, r
+        save_capture("empty", raw, ev)
+        assert capture_counts(os.path.join(ev, "labels.csv")) == {
+            "studying": 1, "resting": 0, "standing": 0, "empty": 1}
+    print("selftest capture ok")
 
 
 def _selftest_trials():
