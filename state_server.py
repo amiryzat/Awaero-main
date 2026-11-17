@@ -294,6 +294,49 @@ def capture_counts(path=None):
     return counts
 
 
+def captured_files(path=None):
+    """{label: [filename, ...]} from the manifest, newest last. For review."""
+    files = {k: [] for k in CAPTURE_LABELS}
+    try:
+        with open(path or EVAL_LABELS, newline="") as f:
+            for row in csv.DictReader(f):
+                if row.get("label") in files:
+                    files[row["label"]].append(row["file"])
+    except FileNotFoundError:
+        pass
+    return files
+
+
+def delete_capture(name, eval_dir=None):
+    """Remove one captured frame + its manifest row (to drop a mislabelled one).
+    `name` must be a bare filename - no path, so it cannot escape eval_frames/."""
+    if not name or "/" in name or "\\" in name or ".." in name:
+        return {"error": "bad file"}
+    eval_dir = eval_dir or EVAL_DIR
+    manifest = os.path.join(eval_dir, "labels.csv")
+    kept, found = [], False
+    try:
+        with open(manifest, newline="") as f:
+            for row in csv.DictReader(f):
+                if row.get("file") == name:
+                    found = True
+                else:
+                    kept.append(row)
+    except FileNotFoundError:
+        return {"error": "no manifest"}
+    if not found:
+        return {"error": "not found"}
+    with open(manifest, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["file", "label", "time"])
+        w.writeheader()
+        w.writerows(kept)
+    try:
+        os.remove(os.path.join(eval_dir, name))
+    except OSError:
+        pass
+    return {"removed": name, "counts": capture_counts(manifest)}
+
+
 def save_capture(label, raw_path=None, eval_dir=None):
     """Save the current CLEAN camera frame (live_raw.jpg) under `label` into
     eval_frames/ and append to the manifest. Returns {saved, counts}, or
@@ -495,10 +538,15 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, record_trial(expected))
 
     def do_DELETE(self):
-        if urlparse(self.path).path != "/trials/last":
-            return self._send(404, {"error": "not found"})
-        removed = delete_last_trial()
-        self._send(200 if removed else 404, {"removed": removed})
+        url = urlparse(self.path)
+        if url.path == "/trials/last":
+            removed = delete_last_trial()
+            return self._send(200 if removed else 404, {"removed": removed})
+        if url.path == "/capture":
+            name = parse_qs(url.query).get("file", [""])[0]
+            res = delete_capture(name)
+            return self._send(404 if "error" in res else 200, res)
+        self._send(404, {"error": "not found"})
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -518,8 +566,10 @@ class Handler(BaseHTTPRequestHandler):
         elif url.path == "/trials":
             self._send(200, trials_report())
         elif url.path == "/capture":
-            self._send(200, {"counts": capture_counts(),
+            self._send(200, {"counts": capture_counts(), "files": captured_files(),
                              "live": frame_fresh(), "labels": list(CAPTURE_LABELS)})
+        elif url.path.startswith("/eval/"):
+            self._serve_eval(url.path[len("/eval/"):])
         elif url.path == "/frame.jpg":
             if not frame_fresh():
                 return self._send(404, {"error": "no live frame"})
@@ -530,6 +580,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(404, {"error": "no live frame"})
         else:
             self._serve_static(url.path)   # the built web dashboard (PRD 6.2)
+
+    def _serve_eval(self, name):
+        """Serve one captured frame from eval_frames/ for the review thumbnails.
+        Read-only, bare filename only - the realpath guard is the trust boundary."""
+        base = os.path.realpath(EVAL_DIR)
+        target = os.path.realpath(os.path.join(EVAL_DIR, name))
+        if target != base and not target.startswith(base + os.sep):
+            return self._send(403, {"error": "forbidden"})
+        if not os.path.isfile(target):
+            return self._send(404, {"error": "not found"})
+        try:
+            with open(target, "rb") as f:
+                self._send(200, f.read(), "image/jpeg")
+        except OSError:
+            self._send(404, {"error": "not found"})
 
     def _serve_static(self, path):
         """Serve web-dashboard/dist/ for any path the API routes above did not
@@ -721,9 +786,15 @@ def _selftest_capture():
             f.write(b"\xff\xd8\xff\xd9")                            # a tiny fake jpeg, fresh
         r = save_capture("studying", raw, ev)
         assert r.get("saved", "").startswith("studying_") and r["counts"]["studying"] == 1, r
-        save_capture("empty", raw, ev)
-        assert capture_counts(os.path.join(ev, "labels.csv")) == {
-            "studying": 1, "resting": 0, "standing": 0, "empty": 1}
+        saved = save_capture("empty", raw, ev)["saved"]
+        man = os.path.join(ev, "labels.csv")
+        assert capture_counts(man) == {"studying": 1, "resting": 0, "standing": 0, "empty": 1}
+        assert len(captured_files(man)["studying"]) == 1 and captured_files(man)["empty"] == [saved]
+        # delete: bad name rejected, real one removes file + manifest row
+        assert "error" in delete_capture("../etc/passwd", ev)
+        assert delete_capture(saved, ev)["counts"]["empty"] == 0
+        assert not os.path.exists(os.path.join(ev, saved))          # file gone
+        assert capture_counts(man)["studying"] == 1                 # other row kept
     print("selftest capture ok")
 
 

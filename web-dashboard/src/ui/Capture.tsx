@@ -15,7 +15,12 @@ const ACTIVITIES = [
   { id: "empty", label: "Empty", sub: "no one in frame", accent: "var(--c)" },
 ] as const;
 
-type Info = { counts: Record<string, number>; live: boolean; labels: string[] };
+type Info = {
+  counts: Record<string, number>;
+  files: Record<string, string[]>;
+  live: boolean;
+  labels: string[];
+};
 
 export default function Capture() {
   const [info, setInfo] = useState<Info | null>(null);
@@ -67,6 +72,15 @@ export default function Capture() {
       setBusy(false);
     }
   }, []);
+
+  const del = useCallback(async (file: string) => {
+    try {
+      const r = await fetch(`/capture?file=${encodeURIComponent(file)}`, { method: "DELETE" });
+      if (r.ok) await refresh();
+    } catch {
+      /* ignore: the 3s poll re-syncs */
+    }
+  }, [refresh]);
 
   useEffect(() => {
     if (!flash) return;
@@ -146,6 +160,56 @@ export default function Capture() {
         <div className="card" style={{ padding: "12px 16px", fontWeight: 600,
           color: flash.ok ? "var(--green)" : "#c0392b" }}>
           {flash.ok ? "✓ " : "✗ "}{flash.text}
+        </div>
+      )}
+
+      {/* Review: eyeball every captured frame and delete any that is mislabelled
+          or caught mid-move, so the eval set's ground truth is actually correct. */}
+      {total > 0 && (
+        <div>
+          <div className="section-title">Review &amp; fix labels</div>
+          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+            Check each one matches its label. Tap ✕ to remove a bad frame.
+          </p>
+          <div style={{ display: "grid", gap: 14 }}>
+            {ACTIVITIES.map((a) => {
+              const files = info?.files[a.id] ?? [];
+              if (files.length === 0) return null;
+              return (
+                <div key={a.id}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: "50%", background: a.accent }} />
+                    <span style={{ fontWeight: 700, fontSize: 14 }}>{a.label}</span>
+                    <span className="muted" style={{ fontSize: 12 }}>{files.length}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+                    {files.map((file) => (
+                      <div key={file} style={{ position: "relative", flexShrink: 0 }}>
+                        <img
+                          src={`/eval/${encodeURIComponent(file)}`}
+                          alt={file}
+                          loading="lazy"
+                          style={{ width: 96, height: 72, objectFit: "cover", borderRadius: 8, background: "#11161c" }}
+                        />
+                        <button
+                          onClick={() => del(file)}
+                          aria-label="delete frame"
+                          style={{
+                            position: "absolute", top: -6, right: -6, width: 22, height: 22,
+                            borderRadius: "50%", border: "none", background: "#c0392b",
+                            color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                            lineHeight: 1, boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

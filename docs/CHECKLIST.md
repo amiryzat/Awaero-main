@@ -3,6 +3,19 @@
 Vision-Based Smart Power Management. What is built vs what is not.
 Last updated: 2026-11-17. Newest live-state pointer: `docs/RESUME.md`.
 
+### Activity-based redesign (Phase 1, 2026-11-17) - the VLM A/B
+- [x] `scene_activity.py` - description -> activity (STUDYING/RESTING/
+      TRANSITIONAL/UNOCCUPIED) + at_desk flag; validated on 2000 real descriptions
+- [x] `eval_two_models.py` - offline Moondream-vs-Qwen over the same frames,
+      data-integrity check, findings + per-frame CSV. Method: `docs/EVAL_two_models.md`
+- [x] Web **Capture tab**: capture labelled frames from the phone off the mounted
+      camera (clean `live_raw.jpg`), review thumbnails + delete to fix labels
+- [ ] Capture >=10 frames/activity, run the A/B, record the result in Chapter 4
+- [ ] Wire the winning engine's activity->appliance logic (desk lamp at desk only)
+- [ ] Gestures: point = desk lamp, rock = AC
+- [ ] DHT22 temperature sensor -> AC on >27C (ordered)
+- [ ] Tag trials by engine; two live runs (Moondream, Qwen) for live latency/accuracy
+
 ## Done
 
 ### Integrated system (`live_system.py`, the main entrypoint)

@@ -2,7 +2,7 @@
 
 Newest-state pointer for a new chat. Read this first, then `CHECKLIST.md`
 (what is built vs not), `CONTEXT.md` (decisions), `PROGRESS.md` (build state).
-Last updated: 2026-11-17 (after the 5-appliance hardware build + the Awaero phone-app session).
+Last updated: 2026-11-17 (after starting the activity-based redesign: scene A/B + Capture).
 
 ## One-line status
 Dashboard + Trials recorder BUILT. The three live-run fixes are BUILT and
@@ -13,6 +13,37 @@ per-transition latency table.
 **Hardware now: 5 appliances (light, fan, tv, desk lamp, aircond) + the LCD on
 ONE Arduino, all tested; the decision policy was rewritten to the supervisor's
 profiles doc.** Not yet done: a full camera->VLM->LED run with the 5 appliances.
+
+## What happened 2026-11-17 (later): activity-based redesign, Phase 1
+Pivot agreed with the owner: stop mapping bare posture to a fixed appliance set;
+interpret the ACTIVITY from the scene and power only what it needs (desk lamp
+only when at the desk, AC on temperature via the ordered DHT22, TV gesture-only).
+Matches the supervisor's Activity->Context->Decision doc. Gestures to add: point
+= desk lamp, rock = AC (thumb isn't tracked, so no thumbs-up). Defaults locked:
+lamp-when-at-desk ON, TV gesture-only, AC 27 on / 25 off.
+
+Built this session (Phase 1 - no hardware needed, all selftested, committed):
+- **Insight:** Moondream ALREADY describes the scene ("sitting at a desk using a
+  laptop" / "lying on a bed"); the old pipeline threw that away. Validated over
+  2000 real descriptions.
+- `scene_activity.py` - interpret(description) -> STUDYING/RESTING/TRANSITIONAL/
+  UNOCCUPIED (+ an at_desk flag for the lamp). Model-agnostic keyword parser.
+- `eval_two_models.py` - the offline A/B: BOTH Moondream and Qwen over the SAME
+  captured frames, same prompt, sequential (no GPU contention), activity parsed
+  by the same rule. Checks data integrity first; writes
+  `eval_two_models_findings.md` + `eval_two_models_results.csv` (per-activity
+  recall, confusion, model agreement, disagreements, latency).
+- **Web Capture tab** - capture labelled frames from the phone off the MOUNTED
+  camera. Saves the CLEAN frame (new `live_raw.jpg`, no overlays) into
+  `eval_frames/`. Review section: thumbnails per label + delete, so ground-truth
+  labels are verified before scoring. New endpoints: POST/GET/DELETE /capture,
+  GET /eval/<file>.
+- Method written up in `docs/EVAL_two_models.md` (Chapter 4 draws from it).
+
+**Next:** capture >=10 frames per activity from the phone, review them, run
+`python eval_two_models.py`, read the findings. Then wire the winning engine's
+activity->appliance logic + the two gestures, tag trials by engine, and do the
+two live runs. DHT22 for temperature-based AC when it arrives.
 
 ## What happened 2026-11-16 (day): 5 appliances + LCD on one Arduino + new policy
 The prototype went from 3 appliances to 5, the LCD moved onto the SAME Arduino as
