@@ -499,7 +499,7 @@ SRC = None
 
 
 class Handler(BaseHTTPRequestHandler):
-    def _send(self, code, body, ctype="application/json"):
+    def _send(self, code, body, ctype="application/json", cache=None):
         if ctype == "application/json":
             body = json.dumps(body).encode()
         self.send_response(code)
@@ -512,8 +512,11 @@ class Handler(BaseHTTPRequestHandler):
         # Native's image loader refuses a no-store image, which left the phone
         # app's Live tab on "Camera feed offline" while the browser showed the
         # frame. no-cache still makes every client re-ask before reusing one, so
-        # a stale frame can never pass as live.
-        self.send_header("Cache-Control", "no-cache" if ctype == "image/jpeg" else "no-store")
+        # a stale frame can never pass as live. `cache` overrides for the hashed
+        # dist assets, which are immutable and were being re-downloaded (~284 KB)
+        # on every reload over the LAN.
+        self.send_header("Cache-Control", cache or
+                         ("no-cache" if ctype == "image/jpeg" else "no-store"))
         self.end_headers()
         self.wfile.write(body)
 
@@ -611,9 +614,13 @@ class Handler(BaseHTTPRequestHandler):
         if not os.path.isfile(target):
             target = index                 # SPA fallback: unknown route -> index.html
         ctype = mimetypes.guess_type(target)[0] or "application/octet-stream"
+        # Vite's /assets/ files are content-hashed, so a new build gets a new
+        # name - safe to cache forever. index.html stays no-store so a rebuild is
+        # picked up immediately.
+        cache = "public, max-age=31536000, immutable" if path.startswith("/assets/") else None
         try:
             with open(target, "rb") as f:
-                self._send(200, f.read(), ctype)
+                self._send(200, f.read(), ctype, cache=cache)
         except OSError:
             self._send(404, {"error": "not found"})
 
