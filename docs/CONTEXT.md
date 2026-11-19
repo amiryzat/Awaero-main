@@ -16,7 +16,8 @@ the open questions. Evidence for every number is in `EVAL_passive_vlm.md`.
   Actuation), ending at USB/PySerial to an Arduino. No networking layer.
   - Passive: scene/posture -> 4 energy profiles: T (transitional/standing),
     A (active sitting), B (resting), C (unoccupied).
-  - Active: hand gestures -> open palm = TV, peace = lights, fist = all-off.
+  - Active: hand gestures -> open palm = TV, peace = lights, point = desk lamp,
+    rock = AC, fist = all-off.
 
 ## Current state (2026-11-17)
 - **app-monitor** (phone app) works over the USB cable through PRD Phase 4;
@@ -70,7 +71,10 @@ watching), and **standing no longer turns the fan off** (standing is a transitio
 not a departure). "No change" rows use a HOLD sentinel resolved by `resolve_hold`
 against whatever the appliance is currently doing; T holds TV and AC.
 
-**AC is an ASSUMED policy, not temperature-aware.** There is no temperature sensor,
+**AC is NOT auto-on (changed 2026-11-19).** It is off in the automatic policy and
+comes on only by the ROCK gesture, or by temperature when the DHT22 arrives. The
+fan is the default cooling, and **AC and fan never run together** (Malaysian norm):
+`exclusive_cooling()` forces the fan off whenever the AC is on. There is no temperature sensor yet,
 and the doc is explicit that AC control must then be described as a configurable
 assumption, never a measured context-aware decision. A DHT11 would make it genuine
 (future work). The desk lamp is a separate appliance from the main light: lamp is

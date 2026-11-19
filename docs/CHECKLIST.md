@@ -11,8 +11,10 @@ Last updated: 2026-11-17. Newest live-state pointer: `docs/RESUME.md`.
 - [x] Web **Capture tab**: capture labelled frames from the phone off the mounted
       camera (clean `live_raw.jpg`), review thumbnails + delete to fix labels
 - [ ] Capture >=10 frames/activity, run the A/B, record the result in Chapter 4
-- [ ] Wire the winning engine's activity->appliance logic (desk lamp at desk only)
-- [ ] Gestures: point = desk lamp, rock = AC
+- [x] Wire the activity->appliance logic (2026-11-19): scene_activity drives the
+      live label; desk lamp on only when at the desk (at_desk scene cue)
+- [x] Gestures (2026-11-19): point = desk lamp, rock = AC. AC/fan mutual
+      exclusion (AC on -> fan off); AC no longer auto-on
 - [ ] DHT22 temperature sensor -> AC on >27C (ordered)
 - [ ] Tag trials by engine; two live runs (Moondream, Qwen) for live latency/accuracy
 
