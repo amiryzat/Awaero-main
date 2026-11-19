@@ -49,7 +49,7 @@ import camera
 import classify_passive
 import moondream_vlm
 import scene_activity
-from live_active import (classify_gesture, hand_is_upright, apply, GESTURE_LABEL,
+from live_active import (classify_gesture, hand_is_upright, GESTURE_LABEL,
                          CONFIRM_FRAMES, HOLD_SECONDS, REARM_SECONDS)
 # live_passive is imported inside main(): it builds the pose model at import time.
 
@@ -122,19 +122,13 @@ def vlm_read(answer):
         return scene_activity.profile_and_desk(answer)
     return parse_label(answer), False
 
-# How long a gesture holds an appliance against the automatic scenario. Without
-# an expiry a fist left the fan off forever, because no gesture turns the fan
-# back on (there are only 3 gestures). With no hold at all, passive would
-# overwrite every gesture immediately and gesture control would be pointless.
-# The hold is PER APPLIANCE and also ends early when the room context changes.
-OVERRIDE_SECONDS = 60.0
-# peace/open_palm hold just the appliance they touch for OVERRIDE_SECONDS. Fist
-# holds NOTHING here: its persistence comes from leaving_latch (all-off until the
-# room empties or ANY gesture cancels it). If fist also set 60 s holds, a "changed
-# my mind" gesture would release the latch but the fan/TV would stay stuck off
-# under those holds - so the latch alone owns the fist.
-GESTURE_HOLDS = {"peace": [0], "open_palm": [2],         # light, tv
-                 "point": [3], "rock": [4], "fist": []}  # desk lamp, AC
+# A gesture sets a STICKY per-appliance override. The appliance stays at the
+# gestured value until the user re-gestures it, or the room empties (leaving the
+# room resets everything). No timer: a gesture is a manual override that wins
+# over the automatic policy and PERSISTS across profile changes - turn the AC on,
+# then lie down, and the AC stays on (the fan stays off by the AC/fan rule).
+# Which appliance each gesture toggles (fist = all off, handled separately):
+GESTURE_APPLIANCE = {"peace": 0, "open_palm": 2, "point": 3, "rock": 4}
 
 # Decision Logic Layer (Layer 4): each profile -> a per-appliance on/off vector.
 # Five appliances, in pin order (arduino/room_node.ino):
@@ -145,29 +139,25 @@ LAMP_IDX = APPLIANCES.index("lamp")       # desk lamp: gated on "at the desk"
 FAN_IDX = APPLIANCES.index("fan")
 AC_IDX = APPLIANCES.index("ac")
 
-# HOLD = the spec's "No change": that appliance keeps whatever it is doing.
-# Standing is a TRANSITION, so it must not decide the TV or the AC - switching
-# them because someone stood up for 5 seconds is the exact thrashing the
-# supervisor's document warns about.
-HOLD = None
 
 # Policy from FYP_Room_Activity_and_Appliance_Decision_Profiles.md section 4.
 # Deliberate choices:
 #   - sitting does NOT turn the TV on (sitting is not proof of watching),
 #   - standing does NOT turn the fan off (brief movement should not switch it),
 #   - the desk lamp is nominal here; the drive gates it on at_desk (scene cue),
-#   - AC is OFF in the automatic policy. It is NOT posture-driven: it comes on by
-#     the ROCK gesture, or (when the DHT22 lands) by temperature. The fan is the
-#     default cooling, and exclusive_cooling() turns the fan off whenever the AC
-#     is on - a fan and an AC are never run together.
+#   - AC is OFF in the automatic policy: it comes on by the ROCK gesture, or
+#     (when the DHT22 lands) by temperature. The fan is the default cooling, and
+#     the AC/fan rule forces the fan off whenever the AC is on.
+# TV/AC in T are plain 0 (not held): a sticky gesture override already keeps a
+# TV-on or AC-on through a stand-up, so the profile does not need "no change".
 # ponytail: B's light is OFF, not dimmed (the 0/1 protocol cannot PWM).
 FUSED_APP  = {"A": (1, 1, 0, 1, 0),
-              "T": (1, 1, HOLD, 0, HOLD),
+              "T": (1, 1, 0, 0, 0),
               "B": (0, 1, 0, 0, 0),
               "C": (0, 0, 0, 0, 0)}
 FUSED_NAME = {"T": "transitional (standing/walking)", "A": "active (sitting)",
               "B": "resting (lying)", "C": "unoccupied"}
-FUSED_ACT  = {"T": "light+fan ON, lamp OFF, TV/AC held",
+FUSED_ACT  = {"T": "light+fan ON, rest off",
               "A": "light+fan ON, lamp if at desk, TV/AC OFF",
               "B": "fan ON, rest OFF", "C": "all OFF"}
 
@@ -357,20 +347,19 @@ def fuse_label(pose_label, vlm_label, current="C"):
 # N is the tunable knob (raise it = stickier, slower; lower it = twitchier).
 POSTURE_DEBOUNCE_N = 2
 
-def leave_target(latch, committed):
-    """Appliance vector under the fist 'leaving' latch: all-off while the latch
-    is held and someone is still present, otherwise the normal profile mapping.
-    The caller clears the latch when this returns the normal mapping."""
-    if latch and committed != "C":
-        return (0,) * NAPP
-    return FUSED_APP[committed]
-
-
-def resolve_hold(target, current):
-    """Turn a profile vector into real 0/1s. Any HOLD entry means "no change",
-    so it takes the appliance's CURRENT value instead of a fixed one."""
-    return tuple(current[i] if target[i] is HOLD else target[i]
-                 for i in range(len(target)))
+def drive_vector(committed, override, at_desk):
+    """The final appliance states to drive. Layers, in order:
+      1. the profile's automatic vector (FUSED_APP),
+      2. the desk lamp auto-lit when sitting (A) AND at the desk,
+      3. any STICKY gesture overrides on top (override[i] None = follow auto),
+      4. the AC/fan exclusion (AC on -> fan off).
+    So a gesture wins over the automation and persists across profile changes,
+    while un-gestured appliances still follow the scene."""
+    auto = list(FUSED_APP[committed])
+    if committed == "A":
+        auto[LAMP_IDX] = 1 if at_desk else 0
+    final = [auto[i] if override[i] is None else override[i] for i in range(NAPP)]
+    return list(exclusive_cooling(final))
 
 def debounce_vlm(label, history, stable, n=POSTURE_DEBOUNCE_N):
     """Call once per NEW VLM read. Returns the posture to feed fusion; mutates
@@ -452,9 +441,8 @@ def main():
 
     window = deque()                         # passive smoothing (holds fused labels)
     committed = "C"
-    leaving_latch = False                    # fist "leaving": hold all-off until C
+    override = [None] * NAPP                 # sticky gesture overrides; None = follow auto
 
-    lights_on = tv_on = lamp_on = ac_on = False   # active gesture state
     recent = deque(maxlen=CONFIRM_FRAMES)
     armed = True
     candidate = "none"
@@ -472,7 +460,6 @@ def main():
     vctx = None                              # pose reading the VLM was judging
     snap = None                              # set on a decision -> saved after overlay
     last_relay = 0.0                         # last write of live_frame.jpg
-    hold_until = [0.0] * NAPP                # per-appliance gesture override expiry
     frame_i = 0
     pose_label, people = None, []            # cached between pose runs
     gesture_seen_time = 0.0                  # last time a gesture was being held
@@ -560,10 +547,7 @@ def main():
                     vlm["person_ts"] = now   # without this, presence confirmation
                                              # expired during gestures and the room
                                              # blinked to C on returning to passive
-                if prev_mode != "ACTIVE":    # seed from what is actually lit, so
-                    lights_on = bool(appl[0])  # entering gesture control no longer
-                    tv_on = bool(appl[2])      # blanks the appliances
-                    lamp_on, ac_on = bool(appl[3]), bool(appl[4])
+                if prev_mode != "ACTIVE":
                     recent.clear()
                     gesture_seen_time = now
                     # every entry is logged + snapshotted with the gate that let it
@@ -600,18 +584,16 @@ def main():
                         held = now - hold_start
                         progress = min(held / HOLD_SECONDS, 1.0)
                         if armed and held >= HOLD_SECONDS:
-                            lights_on, tv_on, lamp_on, ac_on = apply(
-                                stable, lights_on, tv_on, lamp_on, ac_on)
+                            # Set the STICKY override. fist = everything off; any
+                            # other gesture toggles its appliance against what is
+                            # currently lit. The override persists until the user
+                            # re-gestures or the room empties.
                             if stable == "fist":
-                                appl[1] = 0          # fan too (apply zeroed the rest)
-                                leaving_latch = True # "leaving": stay off until room empties
-                            else:
-                                leaving_latch = False  # a staying gesture cancels the latch
-                            appl[0], appl[2], appl[3], appl[4] = (
-                                int(lights_on), int(tv_on), int(lamp_on), int(ac_on))
-                            appl[:] = exclusive_cooling(appl)   # AC on -> fan off
-                            for i in GESTURE_HOLDS.get(stable, []):
-                                hold_until[i] = now + OVERRIDE_SECONDS
+                                override[:] = [0] * NAPP
+                            elif stable in GESTURE_APPLIANCE:
+                                i = GESTURE_APPLIANCE[stable]
+                                override[i] = 0 if appl[i] else 1
+                            appl[:] = drive_vector(committed, override, at_desk_now)
                             decide_ms = since_ms(t_frame)
                             act_ms = timed_set(act, appl)
                             log_row(time=time.strftime("%H:%M:%S"), mode="ACTIVE",
@@ -674,34 +656,12 @@ def main():
                             and votes >= SWITCH_RATIO * len(window))
                 if switched:
                     committed = cand
-                    hold_until = [0.0] * NAPP      # context changed -> auto resumes
-
-                # Drive every appliance that is NOT currently held by a gesture.
-                # Held ones keep the user's choice until their hold expires, so a
-                # gesture is respected without disabling the automation forever.
-                # Fist "leaving" latch: hold everything off until the room actually
-                # empties (C), so a fist on the way out is not undone 6 s later when
-                # ACTIVE drops to PASSIVE and re-commits a profile.
-                if leaving_latch and committed != "C":
-                    target = leave_target(True, committed)
-                else:
-                    leaving_latch = False
-                    target = leave_target(False, committed)
-                target = resolve_hold(target, appl)   # "No change" keeps what is on
-                # Desk lamp (activity, not posture): on only when sitting (A) AND
-                # the scene shows the person AT the desk. Sitting on the bed does
-                # not light the desk lamp. Not latched, so leaving the desk drops
-                # it. ponytail: uses the latest at_desk read; debounce it only if
-                # it visibly flickers (the scene cue has been steady in testing).
-                if committed == "A" and not leaving_latch:
-                    t = list(target)
-                    t[LAMP_IDX] = 1 if at_desk_now else 0
-                    target = tuple(t)
-                # Next state: gesture-held appliances keep their value, the rest
-                # follow the profile; then the AC/fan exclusion is enforced on the
-                # WHOLE vector so a held AC still forces the auto fan off.
-                nxt = [appl[i] if now < hold_until[i] else target[i] for i in range(NAPP)]
-                nxt = list(exclusive_cooling(nxt))
+                # Leaving the room is the reset: an empty room clears every sticky
+                # gesture override, so returning starts fresh on the automatic
+                # policy. Overrides otherwise PERSIST across profile changes.
+                if committed == "C":
+                    override[:] = [None] * NAPP
+                nxt = drive_vector(committed, override, at_desk_now)
                 if nxt != appl:
                     appl[:] = nxt
                     act_ms = timed_set(act, appl)
@@ -739,9 +699,8 @@ def main():
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             else:
                 tag = f"{committed}: {FUSED_NAME[committed]}"
-                held = max(hold_until) - now         # why the LEDs != the profile
-                if held > 0:
-                    tag += f"  [MANUAL {held:.0f}s]"
+                if any(o is not None for o in override):   # a gesture override is active
+                    tag += "  [MANUAL]"
                 cv2.putText(frame, tag, (15, 80),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             # the appliance truth = exactly what the three LEDs are doing
@@ -867,11 +826,19 @@ def _selftest():
     assert debounce_vlm(None, h, "T", n=2) == "T"           # None read: ignored
     assert list(h) == ["T", "T"]                            # None didn't enter history
 
-    # fist "leaving" latch: all-off while present, resumes once the room empties
-    assert leave_target(True, "A") == (0,) * NAPP           # latched + present -> off
-    assert leave_target(True, "T") == (0,) * NAPP
-    assert leave_target(True, "C") == FUSED_APP["C"]        # empty -> normal (all off)
-    assert leave_target(False, "A") == FUSED_APP["A"]       # no latch -> normal profile
+    # drive_vector: auto policy -> at-desk lamp -> sticky overrides -> AC/fan rule
+    _none = [None] * NAPP
+    assert drive_vector("A", _none, True) == [1, 1, 0, 1, 0]    # at desk: + lamp
+    assert drive_vector("A", _none, False) == [1, 1, 0, 0, 0]   # off desk: no lamp
+    assert drive_vector("B", _none, False) == [0, 1, 0, 0, 0]   # lying: fan only
+    assert drive_vector("C", _none, False) == [0, 0, 0, 0, 0]   # empty: all off
+    # AC override wins AND forces the fan off, AND persists from A into B
+    _ac = [None, None, None, None, 1]
+    assert drive_vector("A", _ac, True) == [1, 0, 0, 1, 1]      # at desk + AC: fan off
+    assert drive_vector("B", _ac, False) == [0, 0, 0, 0, 1]     # lying + AC still on
+    # a point-off keeps the desk lamp off even while at the desk
+    assert drive_vector("A", [None, None, None, 0, None], True) == [1, 1, 0, 0, 0]
+    assert drive_vector("A", [0] * NAPP, True) == [0, 0, 0, 0, 0]   # fist: all off, sticky
 
     # a hand high in the frame with nobody matched IS a command
     assert is_control_hand(_fake_hand(0.3, 0.1), [], 1000, 1000)
@@ -951,18 +918,13 @@ def _selftest():
     # fan and AC never run together: AC wins
     assert exclusive_cooling((1, 1, 0, 0, 1)) == (1, 0, 0, 0, 1)   # ac on -> fan off
     assert exclusive_cooling((1, 1, 0, 0, 0)) == (1, 1, 0, 0, 0)   # ac off -> fan kept
-    # the two new gestures toggle their appliance, and classify by finger shape
-    from live_active import apply as _apply, classify_gesture as _cg
-    assert _apply("rock", False, False, False, False) == (False, False, False, True)   # AC on
-    assert _apply("point", False, False, False, False) == (False, False, True, False)  # lamp on
-    assert _apply("fist", True, True, True, True) == (False, False, False, False)       # all off
+    # the two new gestures are classified by finger shape, and each maps to the
+    # appliance it overrides
+    from live_active import classify_gesture as _cg
     assert _cg(_gesture_hand(index=True)) == "point"
     assert _cg(_gesture_hand(index=True, pinky=True)) == "rock"
     assert _cg(_gesture_hand(index=True, middle=True)) == "peace"
-    # HOLD resolves against what is currently on, and only for HOLD entries
-    assert resolve_hold((1, 1, HOLD, 0, HOLD), [0, 0, 1, 1, 0]) == (1, 1, 1, 0, 0)
-    assert resolve_hold((1, 1, HOLD, 0, HOLD), [0, 0, 0, 1, 1]) == (1, 1, 0, 0, 1)
-    assert resolve_hold(FUSED_APP["C"], [1, 1, 1, 1, 1]) == (0,) * NAPP
+    assert GESTURE_APPLIANCE == {"peace": 0, "open_palm": 2, "point": 3, "rock": 4}
     print("selftest ok")
 
 
