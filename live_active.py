@@ -59,6 +59,8 @@ FINGERS = {
 GESTURE_LABEL = {
     "open_palm": "OPEN PALM -> TV",
     "peace": "PEACE -> lights",
+    "point": "POINT -> desk lamp",
+    "rock": "ROCK -> AC",
     "fist": "FIST -> all OFF",
     "none": "(no gesture)",
 }
@@ -91,20 +93,30 @@ def classify_gesture(lm):
         return "open_palm"
     if up["index"] and up["middle"] and not up["ring"] and not up["pinky"]:
         return "peace"
+    # index only = point -> desk lamp; index+pinky = rock ("cool") -> AC. Thumb
+    # is not tracked, so these two finger shapes are the reliable new gestures.
+    if up["index"] and not up["middle"] and not up["ring"] and not up["pinky"]:
+        return "point"
+    if up["index"] and up["pinky"] and not up["middle"] and not up["ring"]:
+        return "rock"
     return "none"
 
 
-def apply(gesture, tv_on, lights_on):
-    if gesture == "open_palm":
-        tv_on = not tv_on
-        print(f"TV toggled -> {'ON' if tv_on else 'OFF'}")
-    elif gesture == "peace":
-        lights_on = not lights_on
-        print(f"Lights toggled -> {'ON' if lights_on else 'OFF'}")
+def apply(gesture, light, tv, lamp, ac):
+    """Toggle the appliance a gesture owns. Returns (light, tv, lamp, ac). The
+    fan has no gesture - it is the default cooling and is forced off by the
+    AC/fan exclusion when the AC is on (live_system.exclusive_cooling)."""
+    if gesture == "peace":
+        light = not light
+    elif gesture == "open_palm":
+        tv = not tv
+    elif gesture == "point":
+        lamp = not lamp
+    elif gesture == "rock":
+        ac = not ac
     elif gesture == "fist":
-        tv_on, lights_on = False, False
-        print("ALL OFF override")
-    return tv_on, lights_on
+        light = tv = lamp = ac = False
+    return light, tv, lamp, ac
 
 
 def led_state(tv_on, lights_on):
@@ -121,9 +133,8 @@ def main():
 
     act = Actuator()            # board, or mock mode if unplugged
 
-    tv_on = False
-    lights_on = False
-    act.set(*led_state(tv_on, lights_on))   # start all OFF -> RED
+    light = tv = lamp = ac = False
+    act.set(*led_state(tv, light))          # start all OFF -> RED (demo: tv+light only)
 
     recent = deque(maxlen=CONFIRM_FRAMES)   # for the consistency gate
     armed = True
@@ -183,8 +194,8 @@ def main():
                     held = now - hold_start
                     progress = min(held / HOLD_SECONDS, 1.0)
                     if armed and held >= HOLD_SECONDS:
-                        tv_on, lights_on = apply(stable, tv_on, lights_on)
-                        act.set(*led_state(tv_on, lights_on))
+                        light, tv, lamp, ac = apply(stable, light, tv, lamp, ac)
+                        act.set(*led_state(tv, light))
                         armed = False
                         candidate = "none"
 

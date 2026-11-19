@@ -133,7 +133,8 @@ OVERRIDE_SECONDS = 60.0
 # room empties or ANY gesture cancels it). If fist also set 60 s holds, a "changed
 # my mind" gesture would release the latch but the fan/TV would stay stuck off
 # under those holds - so the latch alone owns the fist.
-GESTURE_HOLDS = {"peace": [0], "open_palm": [2], "fist": []}  # indexes into APPLIANCES
+GESTURE_HOLDS = {"peace": [0], "open_palm": [2],         # light, tv
+                 "point": [3], "rock": [4], "fist": []}  # desk lamp, AC
 
 # Decision Logic Layer (Layer 4): each profile -> a per-appliance on/off vector.
 # Five appliances, in pin order (arduino/room_node.ino):
@@ -141,6 +142,8 @@ GESTURE_HOLDS = {"peace": [0], "open_palm": [2], "fist": []}  # indexes into APP
 APPLIANCES = ("light", "fan", "tv", "lamp", "ac")
 NAPP = len(APPLIANCES)
 LAMP_IDX = APPLIANCES.index("lamp")       # desk lamp: gated on "at the desk"
+FAN_IDX = APPLIANCES.index("fan")
+AC_IDX = APPLIANCES.index("ac")
 
 # HOLD = the spec's "No change": that appliance keeps whatever it is doing.
 # Standing is a TRANSITION, so it must not decide the TV or the AC - switching
@@ -149,22 +152,34 @@ LAMP_IDX = APPLIANCES.index("lamp")       # desk lamp: gated on "at the desk"
 HOLD = None
 
 # Policy from FYP_Room_Activity_and_Appliance_Decision_Profiles.md section 4.
-# Two changes from the first prototype, both deliberate:
-#   - sitting no longer turns the TV ON (sitting is not proof of watching), and
-#   - standing no longer turns the fan OFF (brief movement should not switch it).
+# Deliberate choices:
+#   - sitting does NOT turn the TV on (sitting is not proof of watching),
+#   - standing does NOT turn the fan off (brief movement should not switch it),
+#   - the desk lamp is nominal here; the drive gates it on at_desk (scene cue),
+#   - AC is OFF in the automatic policy. It is NOT posture-driven: it comes on by
+#     the ROCK gesture, or (when the DHT22 lands) by temperature. The fan is the
+#     default cooling, and exclusive_cooling() turns the fan off whenever the AC
+#     is on - a fan and an AC are never run together.
 # ponytail: B's light is OFF, not dimmed (the 0/1 protocol cannot PWM).
-# AC is an ASSUMED policy, not a measured one: with no temperature sensor the
-# honest claim is "configurable assumption" (doc section 4). On while the
-# occupant is settled, held during a transition, off when the room empties.
-FUSED_APP  = {"A": (1, 1, 0, 1, 1),
+FUSED_APP  = {"A": (1, 1, 0, 1, 0),
               "T": (1, 1, HOLD, 0, HOLD),
-              "B": (0, 1, 0, 0, 1),
+              "B": (0, 1, 0, 0, 0),
               "C": (0, 0, 0, 0, 0)}
 FUSED_NAME = {"T": "transitional (standing/walking)", "A": "active (sitting)",
               "B": "resting (lying)", "C": "unoccupied"}
 FUSED_ACT  = {"T": "light+fan ON, lamp OFF, TV/AC held",
-              "A": "light+fan+lamp+AC ON, TV OFF",
-              "B": "fan+AC ON, light/TV/lamp OFF", "C": "all OFF"}
+              "A": "light+fan ON, lamp if at desk, TV/AC OFF",
+              "B": "fan ON, rest OFF", "C": "all OFF"}
+
+
+def exclusive_cooling(vec):
+    """Fan and AC never run together (Malaysian norm: you use one, not both).
+    AC wins - whenever the AC is on, the fan is forced off."""
+    if vec[AC_IDX]:
+        v = list(vec)
+        v[FAN_IDX] = 0
+        return tuple(v)
+    return tuple(vec)
 
 LOG_PATH = "live_log.csv"
 LOG_FIELDS = ["time", "mode", "people", "pose", "vlm", "phone", "vlm_latency_s",
@@ -439,7 +454,7 @@ def main():
     committed = "C"
     leaving_latch = False                    # fist "leaving": hold all-off until C
 
-    tv_on = lights_on = False                # active gesture state
+    lights_on = tv_on = lamp_on = ac_on = False   # active gesture state
     recent = deque(maxlen=CONFIRM_FRAMES)
     armed = True
     candidate = "none"
@@ -548,6 +563,7 @@ def main():
                 if prev_mode != "ACTIVE":    # seed from what is actually lit, so
                     lights_on = bool(appl[0])  # entering gesture control no longer
                     tv_on = bool(appl[2])      # blanks the appliances
+                    lamp_on, ac_on = bool(appl[3]), bool(appl[4])
                     recent.clear()
                     gesture_seen_time = now
                     # every entry is logged + snapshotted with the gate that let it
@@ -584,13 +600,16 @@ def main():
                         held = now - hold_start
                         progress = min(held / HOLD_SECONDS, 1.0)
                         if armed and held >= HOLD_SECONDS:
-                            tv_on, lights_on = apply(stable, tv_on, lights_on)
+                            lights_on, tv_on, lamp_on, ac_on = apply(
+                                stable, lights_on, tv_on, lamp_on, ac_on)
                             if stable == "fist":
-                                appl[1] = appl[3] = appl[4] = 0   # all-off: fan, lamp, AC too
+                                appl[1] = 0          # fan too (apply zeroed the rest)
                                 leaving_latch = True # "leaving": stay off until room empties
                             else:
                                 leaving_latch = False  # a staying gesture cancels the latch
-                            appl[0], appl[2] = int(lights_on), int(tv_on)
+                            appl[0], appl[2], appl[3], appl[4] = (
+                                int(lights_on), int(tv_on), int(lamp_on), int(ac_on))
+                            appl[:] = exclusive_cooling(appl)   # AC on -> fan off
                             for i in GESTURE_HOLDS.get(stable, []):
                                 hold_until[i] = now + OVERRIDE_SECONDS
                             decide_ms = since_ms(t_frame)
@@ -678,10 +697,13 @@ def main():
                     t = list(target)
                     t[LAMP_IDX] = 1 if at_desk_now else 0
                     target = tuple(t)
-                if any(now >= hold_until[i] and appl[i] != target[i] for i in range(NAPP)):
-                    for i in range(NAPP):
-                        if now >= hold_until[i]:
-                            appl[i] = target[i]
+                # Next state: gesture-held appliances keep their value, the rest
+                # follow the profile; then the AC/fan exclusion is enforced on the
+                # WHOLE vector so a held AC still forces the auto fan off.
+                nxt = [appl[i] if now < hold_until[i] else target[i] for i in range(NAPP)]
+                nxt = list(exclusive_cooling(nxt))
+                if nxt != appl:
+                    appl[:] = nxt
                     act_ms = timed_set(act, appl)
 
                 if switched:
@@ -794,6 +816,17 @@ def _fake_hand(wrist_y, knuckle_y, x=0.5):
     lm = [_P(x, wrist_y) for _ in range(21)]
     for i in (5, 9, 17):
         lm[i] = _P(x, knuckle_y)
+    return lm
+
+
+def _gesture_hand(index=False, middle=False, ring=False, pinky=False):
+    """An upright hand with the named fingers extended, for classify_gesture:
+    a finger is 'up' when its tip (y) sits above its pip (smaller y)."""
+    lm = _fake_hand(wrist_y=0.9, knuckle_y=0.3)      # knuckles above wrist -> upright
+    for up, (tip, pip) in [(index, (8, 6)), (middle, (12, 10)),
+                           (ring, (16, 14)), (pinky, (20, 18))]:
+        lm[pip] = _P(0.5, 0.3)
+        lm[tip] = _P(0.5, 0.1 if up else 0.5)        # tip above pip only when up
     return lm
 
 
@@ -913,6 +946,19 @@ def _selftest():
     # the two deliberate policy changes, pinned so they cannot regress silently
     assert FUSED_APP["A"][2] == 0, "sitting must NOT switch the TV on"
     assert FUSED_APP["T"][1] == 1, "standing must NOT switch the fan off"
+    assert FUSED_APP["A"][AC_IDX] == 0 and FUSED_APP["B"][AC_IDX] == 0, \
+        "AC is gesture/temperature-driven, not auto-on"
+    # fan and AC never run together: AC wins
+    assert exclusive_cooling((1, 1, 0, 0, 1)) == (1, 0, 0, 0, 1)   # ac on -> fan off
+    assert exclusive_cooling((1, 1, 0, 0, 0)) == (1, 1, 0, 0, 0)   # ac off -> fan kept
+    # the two new gestures toggle their appliance, and classify by finger shape
+    from live_active import apply as _apply, classify_gesture as _cg
+    assert _apply("rock", False, False, False, False) == (False, False, False, True)   # AC on
+    assert _apply("point", False, False, False, False) == (False, False, True, False)  # lamp on
+    assert _apply("fist", True, True, True, True) == (False, False, False, False)       # all off
+    assert _cg(_gesture_hand(index=True)) == "point"
+    assert _cg(_gesture_hand(index=True, pinky=True)) == "rock"
+    assert _cg(_gesture_hand(index=True, middle=True)) == "peace"
     # HOLD resolves against what is currently on, and only for HOLD entries
     assert resolve_hold((1, 1, HOLD, 0, HOLD), [0, 0, 1, 1, 0]) == (1, 1, 1, 0, 0)
     assert resolve_hold((1, 1, HOLD, 0, HOLD), [0, 0, 0, 1, 1]) == (1, 1, 0, 0, 1)
