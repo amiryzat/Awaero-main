@@ -242,7 +242,7 @@ def offline_accuracy(path=EVAL_PATH):
 # computed, never trusted from the client. One new file (trials.csv); live_log.csv
 # is never touched. RO3 wants >=10 trials per response path.
 
-TRIAL_PATHS = ("T", "A", "B", "C", "open_palm", "peace", "fist")
+TRIAL_PATHS = ("T", "A", "B", "C", "open_palm", "peace", "point", "rock", "fist")
 TRIAL_FIELDS = ["time", "expected", "got", "correct", "mode", "online",
                 "decide_latency_ms", "actuate_latency_ms", "vlm_latency_s"]
 _trial_lock = threading.Lock()

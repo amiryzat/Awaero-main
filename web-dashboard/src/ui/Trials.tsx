@@ -23,12 +23,14 @@ const POSTURES = [
 const GESTURES = [
   { id: "open_palm", label: "Open palm", sub: "TV" },
   { id: "peace", label: "Peace", sub: "lights" },
+  { id: "point", label: "Point", sub: "desk lamp" },
+  { id: "rock", label: "Rock", sub: "AC" },
   { id: "fist", label: "Fist", sub: "all off" },
 ] as const;
 
 export const LABELS: Record<string, string> = {
   A: "Active", T: "Transitional", B: "Resting", C: "Unoccupied",
-  open_palm: "Open palm", peace: "Peace", fist: "Fist",
+  open_palm: "Open palm", peace: "Peace", point: "Point", rock: "Rock", fist: "Fist",
 };
 
 type Summ = { n: number; correct: number; pct: number };
