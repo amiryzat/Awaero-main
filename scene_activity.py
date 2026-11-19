@@ -37,6 +37,10 @@ STAND = ("standing", "stands", "walking", "walks")
 LABEL_TO_ACTIVITY = {"studying": "STUDYING", "resting": "RESTING",
                      "standing": "TRANSITIONAL", "empty": "UNOCCUPIED"}
 
+# The live system still speaks in profile letters (T/A/B/C); activities map 1:1.
+ACTIVITY_TO_PROFILE = {"STUDYING": "A", "RESTING": "B",
+                       "TRANSITIONAL": "T", "UNOCCUPIED": "C"}
+
 
 def _has(text, words):
     """Whole-word match for single words (so 'laying' does not hit 'playing'),
@@ -87,6 +91,14 @@ def activity(description):
     return interpret(description)[0]
 
 
+def profile_and_desk(description):
+    """For the live system: (profile letter, at_desk). The letter drives the
+    existing fusion/appliance machinery; at_desk gates the desk lamp so it lights
+    only when the person is actually working at the desk, not just 'sitting'."""
+    act, detail = interpret(description)
+    return ACTIVITY_TO_PROFILE[act], detail["at_desk"]
+
+
 def _selftest():
     # Real-shape descriptions (the style Moondream/Qwen actually produce).
     cases = [
@@ -120,6 +132,10 @@ def _selftest():
         act, detail = interpret(desc)
         assert act == want_act, f"{want_act} expected, got {act}: {desc!r}"
         assert detail["at_desk"] == want_desk, f"at_desk {want_desk}: {desc!r}"
+    assert profile_and_desk("A man sitting at a desk using a laptop.") == ("A", True)
+    assert profile_and_desk("A person lying on a bed.") == ("B", False)
+    assert profile_and_desk("A person standing by the wardrobe.") == ("T", False)
+    assert profile_and_desk("An empty room with a bed and a desk.") == ("C", False)
     assert activity("") == "UNOCCUPIED"                 # empty text -> nobody
     assert LABEL_TO_ACTIVITY["studying"] == "STUDYING"  # capture labels map 1:1
     print("scene_activity selftest ok")

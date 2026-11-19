@@ -48,6 +48,7 @@ from display_node import LcdDisplay, status_lines
 import camera
 import classify_passive
 import moondream_vlm
+import scene_activity
 from live_active import (classify_gesture, hand_is_upright, apply, GESTURE_LABEL,
                          CONFIRM_FRAMES, HOLD_SECONDS, REARM_SECONDS)
 # live_passive is imported inside main(): it builds the pose model at import time.
@@ -110,6 +111,17 @@ def use_qwen():
     VLM_MIN_INTERVAL = 3.0
     PRESENCE_CONFIRM_SECONDS = None
 
+
+def vlm_read(answer):
+    """(profile letter, at_desk) from one VLM answer. Moondream DESCRIBES the
+    scene, so scene_activity reads the activity AND whether the person is at the
+    desk - the exact parser the two-model A/B validated (97.5%), now driving the
+    live decision too. Qwen returns a single letter with no scene detail, so
+    at_desk is unknown and the desk lamp stays off in that mode."""
+    if ask is moondream_vlm.ask:
+        return scene_activity.profile_and_desk(answer)
+    return parse_label(answer), False
+
 # How long a gesture holds an appliance against the automatic scenario. Without
 # an expiry a fist left the fan off forever, because no gesture turns the fan
 # back on (there are only 3 gestures). With no hold at all, passive would
@@ -128,6 +140,7 @@ GESTURE_HOLDS = {"peace": [0], "open_palm": [2], "fist": []}  # indexes into APP
 #   pin 9 light, pin 10 fan, pin 11 tv, pin 8 desk lamp, pin 7 aircond.
 APPLIANCES = ("light", "fan", "tv", "lamp", "ac")
 NAPP = len(APPLIANCES)
+LAMP_IDX = APPLIANCES.index("lamp")       # desk lamp: gated on "at the desk"
 
 # HOLD = the spec's "No change": that appliance keeps whatever it is doing.
 # Standing is a TRANSITION, so it must not decide the TV or the AC - switching
@@ -381,7 +394,7 @@ def main():
 
     # --- VLM background worker: classify the latest frame, store the result ---
     vlm = {"label": None, "phone": "", "latency": "", "ts": 0.0, "pose_ctx": None,
-           "person_ts": 0.0}                 # last time the VLM described a person
+           "person_ts": 0.0, "at_desk": False}   # at_desk: scene shows them at the desk
     shared = {"frame": None, "want": False, "stop": False, "pose_ctx": None}
     vlm_lock = threading.Lock()
 
@@ -398,10 +411,12 @@ def main():
                 if okj:
                     try:
                         ans, elapsed = ask(buf.tobytes(), VLM_PROMPT)
-                        lab, ph = parse_label(ans), parse_phone(ans)
+                        lab, at_desk = vlm_read(ans)
+                        ph = parse_phone(ans)
                         if lab in ("T", "A", "B", "C"):
                             with vlm_lock:
                                 vlm["label"], vlm["phone"] = lab, ph
+                                vlm["at_desk"] = at_desk
                                 vlm["pose_ctx"] = ctx
                                 if lab in ("T", "A", "B"):
                                     vlm["person_ts"] = time.time()
@@ -436,6 +451,7 @@ def main():
     vlm_stable = None                        # posture after debounce (fed to fusion)
     vlm_hist = deque()                        # last N distinct VLM reads
     last_vts = -1.0                           # ts of the last read we debounced
+    at_desk_now = False                       # latest scene cue: person at the desk
     vlm_phone = ""
     vlm_lat = ""
     vctx = None                              # pose reading the VLM was judging
@@ -611,6 +627,7 @@ def main():
                     with vlm_lock:
                         v, vlm_phone = vlm["label"], vlm["phone"]
                         vlm_lat, vts, vctx = vlm["latency"], vlm["ts"], vlm["pose_ctx"]
+                        at_desk_now = vlm["at_desk"]
                     if now - vts > VLM_STALE_SECONDS:   # too old to trust
                         v = None
                     elif vts != last_vts:               # a NEW distinct VLM read
@@ -652,6 +669,15 @@ def main():
                     leaving_latch = False
                     target = leave_target(False, committed)
                 target = resolve_hold(target, appl)   # "No change" keeps what is on
+                # Desk lamp (activity, not posture): on only when sitting (A) AND
+                # the scene shows the person AT the desk. Sitting on the bed does
+                # not light the desk lamp. Not latched, so leaving the desk drops
+                # it. ponytail: uses the latest at_desk read; debounce it only if
+                # it visibly flickers (the scene cue has been steady in testing).
+                if committed == "A" and not leaving_latch:
+                    t = list(target)
+                    t[LAMP_IDX] = 1 if at_desk_now else 0
+                    target = tuple(t)
                 if any(now >= hold_until[i] and appl[i] != target[i] for i in range(NAPP)):
                     for i in range(NAPP):
                         if now >= hold_until[i]:
@@ -841,6 +867,11 @@ def _selftest():
 
     # engine wiring: Moondream by default, and `qwen` really swaps everything
     assert ask is moondream_vlm.ask and VLM_NAME == moondream_vlm.MODEL
+    # Moondream path: the live label + at_desk come from scene_activity (the
+    # parser the A/B validated), and the lamp follows at_desk.
+    assert vlm_read("A man sitting at a desk using a laptop.") == ("A", True)
+    assert vlm_read("A person lying on a bed.") == ("B", False)
+    assert vlm_read("An empty room with a desk and a bed.") == ("C", False)
     assert PRESENCE_CONFIRM_SECONDS == 10.0 and VLM_MIN_INTERVAL == 1.0
     use_qwen()
     assert ask is classify_passive.ask and parse_label is classify_passive.parse_label
