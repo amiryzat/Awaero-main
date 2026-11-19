@@ -271,11 +271,15 @@ def control_hand_debug(lm, people, w, h):
     # (observed 2026-11-14). Every person horizontally under the hand counts and
     # the hand must clear the highest face, so a phantom on a chair cannot help.
     heads = [p[3] for p in people if p[0][0] <= cx <= p[0][2]]
-    if heads:
-        ok = knuckles < min(heads)
-        return ok, ("OK" if ok else "below head")
-    hi = cy < HAND_RAISE_FRACTION * h
-    return hi, ("OK" if hi else "too low in frame")
+    if not heads:
+        # No detected person under the hand. The old fallback ("any hand high in
+        # the frame") fired ACTIVE while sitting at the desk whenever pose briefly
+        # dropped the person (people=0) - the false activation in the log. A real
+        # gesture is made by a PRESENT person, so with no person there is no
+        # command. ponytail: cx/cy/HAND_RAISE_FRACTION kept for the overlay only.
+        return False, "no person under hand"
+    ok = knuckles < min(heads)
+    return ok, ("OK" if ok else "below head")
 
 
 def timed_set(act, appl):
@@ -873,8 +877,9 @@ def _selftest():
     assert leave_target(True, "C") == FUSED_APP["C"]        # empty -> normal (all off)
     assert leave_target(False, "A") == FUSED_APP["A"]       # no latch -> normal profile
 
-    # a hand high in the frame with nobody matched IS a command
-    assert is_control_hand(_fake_hand(0.3, 0.1), [], 1000, 1000)
+    # a hand with NO detected person is NOT a command: this was the false
+    # ACTIVE that fired while sitting at the desk when pose briefly lost the person
+    assert not is_control_hand(_fake_hand(0.3, 0.1), [], 1000, 1000)
     # a hand on the keyboard (knuckles not above the wrist) is NOT - this is the
     # bug that pinned the system in ACTIVE while sitting at the desk
     assert not is_control_hand(_fake_hand(0.90, 0.88), [], 1000, 1000)
