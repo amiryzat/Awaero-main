@@ -232,6 +232,13 @@ in) would land near 98%, but the 77-trial set is honest and usable as-is.
 - The dashboard Stats tab renders activation reduction (~15.6% last window) + accuracy live.
 
 ## Run reminders
+- **The dashboard server runs as a launchd service** (`~/Library/LaunchAgents/
+  com.amiryzat.awaero.server.plist`, outside the repo): starts at login, restarts
+  on crash (KeepAlive), and `caffeinate -is` stops the Mac sleeping on AC power.
+  Do NOT start a second `python state_server.py` on 8000 (port clash). To restart
+  after code changes: `launchctl kickstart -k gui/$(id -u)/com.amiryzat.awaero.server`.
+  Stop it for good: `launchctl bootout gui/$(id -u)/com.amiryzat.awaero.server`.
+  Log: `/tmp/state_server.log`.
 - Server: `python state_server.py` (prints the Mac address; also Amirv-Mac.local:8000).
   Serves the dashboard at `/`. `--selftest` checks the math.
 - System: `python live_system.py` (Moondream) / `python live_system.py qwen`.
