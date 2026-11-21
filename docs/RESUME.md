@@ -2,17 +2,38 @@
 
 Newest-state pointer for a new chat. Read this first, then `CHECKLIST.md`
 (what is built vs not), `CONTEXT.md` (decisions), `PROGRESS.md` (build state).
-Last updated: 2026-11-17 (after starting the activity-based redesign: scene A/B + Capture).
+Last updated: 2026-11-21.
 
 ## One-line status
-Dashboard + Trials recorder BUILT. The three live-run fixes are BUILT and
-VALIDATED in a second run. **Before: 73 trials, 94.5%. After: 77 trials, 89.6%
-raw -> A & B both now 100% (were 90/80), and 98.0% (50/51) once operator timing
-settled.** The before/after is the Chapter 4 story. Next = writing + the
-per-transition latency table.
-**Hardware now: 5 appliances (light, fan, tv, desk lamp, aircond) + the LCD on
-ONE Arduino, all tested; the decision policy was rewritten to the supervisor's
-profiles doc.** Not yet done: a full camera->VLM->LED run with the 5 appliances.
+**OLED TV display WORKING.** A 0.96" SH1106 OLED on software I2C (pins 12/13)
+represents the TV appliance: shows "AWAERO / TV is ON" when TV=1, goes blank
+when TV=0. The LCD stays on hardware I2C (A4/A5) as the status display. Both
+screens tested together on the updated `room_node.ino` firmware. The firmware
+uses U8g2 (SH1106 page-buffer mode) for the OLED and LiquidCrystal_I2C for
+the LCD. RAM: 1030 bytes free (tight but stable).
+
+**Hardware now: 5 LEDs + LCD + OLED on ONE Arduino, all tested.** Arduino port
+is now `/dev/cu.usbmodem1101` (changed USB port). Sticky gesture overrides +
+AC/fan mutual exclusion are coded but NOT yet validated live (room was crowded).
+Next: wire DHT22 sensor, DC motor, then do the full live test.
+
+## What happened 2026-11-21: OLED TV display wired and tested
+- Wired a 0.96" SH1106 OLED as the TV screen representation. When TV appliance
+  is on, the OLED shows content; when off, it goes blank.
+- **Sharing hardware I2C (A4/A5) between LCD and OLED FAILED**: the U8g2 and
+  LiquidCrystal_I2C libraries clash, and breadboard column sharing was unreliable
+  (loose contacts). Fix: LCD stays on hardware I2C (A4/A5 direct to Arduino), OLED
+  goes on software I2C (pins 12 SDA, 13 SCL).
+- OLED chip is **SH1106** (not SSD1306). Tested: SSD1306 driver shows nothing.
+- Firmware `arduino/room_node.ino` updated: includes U8g2, draws on the OLED
+  when the TV value changes (index 2 in the LED command). RAM usage: 1018 bytes
+  globals, 1030 free. Compiles at 44% flash.
+- Both screens tested together: LCD shows status text, OLED shows TV content,
+  all 5 LEDs respond to serial commands. All verified.
+- Arduino USB port changed to `/dev/cu.usbmodem1101`.
+- Eye animation demo tested on OLED (cute!), then room_node firmware restored.
+- `docs/WIRING.md` updated with full pin map including OLED, LCD, and reserved
+  pins for DHT22 (pin 6) and DC motor (pin 3).
 
 ## What happened 2026-11-17 (later): activity-based redesign, Phase 1
 Pivot agreed with the owner: stop mapping bare posture to a fixed appliance set;

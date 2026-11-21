@@ -19,7 +19,7 @@ the open questions. Evidence for every number is in `EVAL_passive_vlm.md`.
   - Active: hand gestures -> open palm = TV, peace = lights, point = desk lamp,
     rock = AC, fist = all-off.
 
-## Current state (2026-11-17)
+## Current state (2026-11-21)
 - **app-monitor** (phone app) works over the USB cable through PRD Phase 4;
   auto-discovery rewritten and installed on the iPhone 17. **Wireless
   phone-to-Mac is a dead end on the borrowed WiFi** (two APs share one
@@ -52,7 +52,10 @@ the open questions. Evidence for every number is in `EVAL_passive_vlm.md`.
   It refuses to fall back to the Mac webcam.
 - **Five appliances (revised 2026-11-16):** pin 9 light, 10 fan, 11 tv, 8 desk
   lamp, 7 aircond. The LCD runs on the SAME Arduino (`arduino/room_node.ino`, 0x27),
-  no second board. Breadboard holes in `docs/WIRING.md`. The decision policy now
+  no second board. A **0.96" SH1106 OLED** (added 2026-11-21) on software I2C
+  (pins 12/13) represents the TV: shows content when TV=1, blank when TV=0. The
+  LCD stays on hardware I2C (A4/A5). Both screens + 5 LEDs on one Uno, tested.
+  Breadboard holes and full pin map in `docs/WIRING.md`. The decision policy now
   follows `FYP_Room_Activity_and_Appliance_Decision_Profiles.md` (see below).
 - **Logging:** `live_log.csv` (or `live_log_moondream.csv`) = the RO3 data
   source for the app. Snapshots per decision; the Moondream runner also saves
@@ -133,7 +136,8 @@ evaluated alternative in Chapter 4.
 - `state_server.py` (JSON API, Trials, serves the dashboard), `web-dashboard/`
   (React + Vite "Awaero"; spec `web-dashboard/PRD.md`), `awaero-app/` (Expo phone
   app, same server data, 5 appliances).
-- `docs/WIRING.md` - exact breadboard holes for all 5 appliances + the LCD rails.
+- `docs/WIRING.md` - exact breadboard holes for all 5 appliances, LCD, OLED, and
+  full pin map (including reserved pins for DHT22 and DC motor).
 - `FYP_Room_Activity_and_Appliance_Decision_Profiles.md` - the supervisor's spec
   the revised policy implements.
 - Docs: `PROGRESS.md` (build detail), `CHECKLIST.md` (done vs not),

@@ -36,6 +36,37 @@ AC is an ASSUMED policy (no temperature sensor). If a DHT11 is added later it
 becomes genuinely temperature-aware; until then the writing must call it a
 configurable assumption, per the doc.
 
+## 16x2 LCD (status display)
+I2C at 0x27, on hardware I2C (A4 SDA, A5 SCL). Direct wires to the Arduino,
+no breadboard middleman. VCC -> red (+) rail, GND -> blue (-) rail.
+
+## 0.96" OLED SH1106 (TV display)
+Software I2C on digital pins 12 (SDA) and 13 (SCL). The OLED represents the
+TV appliance: when TV is on it shows content, when off it goes blank. Wired
+with female-to-male jumpers from the OLED header to the Arduino digital pins.
+VCC -> red (+) rail, GND -> blue (-) rail.
+
+NOTE: The LCD and OLED use DIFFERENT I2C buses. Sharing hardware I2C (A4/A5)
+caused library conflicts (U8g2 vs LiquidCrystal_I2C). The fix was to put the
+OLED on software I2C (pins 12/13). The LCD stays on hardware I2C (A4/A5).
+The OLED chip is SH1106, not SSD1306 (tested: SSD1306 driver shows nothing).
+
+## Pin map (updated 2026-11-21)
+| Pin | Use |
+|-----|-----|
+| 2-5 | stepper (parked, too slow) |
+| 6 | (reserved for DHT22) |
+| 7 | AC LED |
+| 8 | Desk lamp LED |
+| 9 | Light LED |
+| 10 | Fan LED |
+| 11 | TV LED |
+| 12 | OLED SDA (software I2C) |
+| 13 | OLED SCL (software I2C) |
+| A4 | LCD SDA (hardware I2C) |
+| A5 | LCD SCL (hardware I2C) |
+
 ## Still to do
-- stepper motor (28BYJ-48 + ULN2003) as the physical fan, pins 2-5
-- optional: servo as an AC vent flap; DHT11 for real temperature-based AC
+- DHT22 temperature/humidity sensor on pin 6
+- DC motor + IRF520 MOSFET on pin 3 (PWM) to replace the parked stepper
+- optional: relay module for a higher-current appliance demo

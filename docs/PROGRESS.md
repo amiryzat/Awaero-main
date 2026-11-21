@@ -1,6 +1,6 @@
 # FYP Progress - Vision-Based Smart Power Management
 
-Last updated: 2026-11-17
+Last updated: 2026-11-21
 
 ## Status: working end to end, live-tested on the iPhone 12 + Arduino
 
@@ -58,20 +58,26 @@ keeps whatever the appliance is doing). AC is an ASSUMED policy (no temp sensor)
 | confirms presence | no (too slow) | yes, 10 s window |
 | leaving -> C | 8 s, or never if pose sees phantoms | 10-18 s |
 
-## Hardware (rebuilt 2026-11-16: 5 appliances + LCD + stepper on ONE Uno)
+## Hardware (rebuilt 2026-11-21: 5 appliances + LCD + OLED on ONE Uno)
 - Board: Arduino UNO, port `/dev/cu.usbmodem1101`, FQBN `arduino:avr:uno`.
 - Toolchain: `arduino-cli` (no IDE); Rosetta 2 required for the AVR toolchain.
 - 5 LEDs: pin 9 light, 10 fan, 11 tv, 8 desk lamp, 7 aircond. Each pin -> 1 kOhm
   -> LED long leg; short leg -> breadboard blue (-) rail -> one wire to Arduino GND.
   (One shared ground rail because 5 LEDs + LCD exceed the 3 Arduino GND holes.)
-- LCD: 16x2 I2C at 0x27, GND->blue rail, VCC->red (+) rail (fed from Arduino 5V),
-  SDA->A4, SCL->A5. Same board as the LEDs.
+- LCD: 16x2 I2C at 0x27, on hardware I2C (SDA->A4, SCL->A5, direct to Arduino).
+  GND->blue rail, VCC->red (+) rail (fed from Arduino 5V). Status display.
+- OLED: 0.96" SH1106 at 0x3C, on software I2C (SDA->pin 12, SCL->pin 13).
+  GND->blue rail, VCC->red (+) rail. Represents the TV appliance: shows content
+  when TV=1, blank when TV=0. Uses U8g2 page-buffer mode (low RAM).
+  NOTE: sharing hardware I2C between LCD and OLED caused library conflicts; software
+  I2C on separate pins was the fix.
 - Stepper fan (PARKED, too slow): 28BYJ-48 + ULN2003 on pins 2-5, spins when the
   fan value is on. Being replaced by a fast DC motor + IRF520 MOSFET module.
 - Firmware: `arduino/room_node.ino`. Accepts `"l,f,t,d,a\n"` for the LEDs (variable
   count; an old `"a,b,c"` still works) and `"top|bottom\n"` for the LCD, at 9600
-  baud. Probes 0x27 at boot and skips LCD calls if none answers, so a missing screen
-  never hangs the LEDs. Exact breadboard holes: `docs/WIRING.md`.
+  baud. The TV value (index 2) also drives the OLED. Probes 0x27 at boot and skips
+  LCD calls if none answers. RAM: 1018 bytes globals, 1030 free. Full pin map
+  in `docs/WIRING.md`.
 
 ## Key files
 - `live_system.py` - main entrypoint. Pure logic (`decide_mode`, `fuse_label`,
@@ -125,6 +131,8 @@ so they don't share the GPU (`ollama stop qwen3-vl:4b`).
 arduino-cli compile --fqbn arduino:avr:uno arduino/room_node
 arduino-cli upload -p /dev/cu.usbmodem1101 --fqbn arduino:avr:uno arduino/room_node
 ```
+Arduino libs installed: LiquidCrystal I2C 1.1.2, U8g2 2.36.19, DHT sensor
+library 1.4.7, Adafruit Unified Sensor.
 
 ## Environment
 - `venv` (Python 3.12): mediapipe 0.10.21, opencv 4.11.0, numpy 1.26.4,
@@ -133,6 +141,12 @@ arduino-cli upload -p /dev/cu.usbmodem1101 --fqbn arduino:avr:uno arduino/room_n
   ("Amvx") excluded.
 
 ## Session log
+- **2026-11-21**: OLED TV display wired and tested. 0.96" SH1106 OLED on software
+  I2C (pins 12/13) represents the TV: shows content when TV=1, blank when TV=0.
+  Sharing hardware I2C (A4/A5) caused library conflicts (U8g2 vs LiquidCrystal_I2C);
+  fix: LCD on hardware I2C, OLED on software I2C. Firmware updated with U8g2 page
+  mode. Both screens work together. Pin map and WIRING.md updated. Port now
+  `/dev/cu.usbmodem1101`.
 - **2026-11-17**: Awaero phone app built (`awaero-app/`, a copy of app-monitor,
   `com.amiryzat.awaero`) carrying the same server data as the web dashboard, 5
   appliances, Trials tab, real accuracy. Fixed `state_server.py` to serve camera

@@ -1,32 +1,33 @@
 /*
   room_node - ONE Arduino drives the appliance LEDs, the 16x2 I2C LCD, AND a
-  28BYJ-48 stepper (via a ULN2003 board) that is the PHYSICAL fan.
+  0.96" SH1106 OLED that represents the TV screen.
 
   Appliances (5): light, fan, tv, desk lamp, aircond.
     pin 9  light    pin 10 fan    pin 11 tv    pin 8 desk lamp    pin 7 aircond
-  Fan stepper (ULN2003 IN1-IN4): pins 2, 3, 4, 5.
+  OLED (TV display): software I2C on pins 12 (SDA) and 13 (SCL).
+  Fan stepper (ULN2003 IN1-IN4): pins 2, 3, 4, 5 (parked).
 
   Protocol over USB serial (9600 baud), one line per message:
     "1,0,1,1,0\n"       LEDs in order light,fan,tv,lamp,ac (0/1 each). Fewer
                         values is fine. The FAN value also runs the stepper:
                         fan=1 spins it, fan=0 stops and de-energises it.
+                        The TV value (index 2) also drives the OLED: tv=1 shows
+                        content, tv=0 blanks the screen.
     "top line|bottom\n" LCD: two lines of text; the Mac formats it.
 
-  The stepper is driven NON-BLOCKING: loop() advances it one half-step only when
-  STEP_INTERVAL_US has passed, so serial, LEDs and LCD stay responsive while it
-  turns. The 28BYJ-48 is heavily geared (~4096 half-steps/rev) so even at full
-  speed it turns slowly - that is the motor, not the code.
-
-  The LCD is auto-detected at 0x27; with none attached the LEDs still work.
+  The LCD is on hardware I2C (A4/A5, addr 0x27).
+  The OLED is on software I2C (pins 12/13) so the two libraries don't clash.
 */
 
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <U8g2lib.h>
 
 // Appliance order: light, fan, tv, lamp, ac
 const int PINS[] = {9, 10, 11, 8, 7};
 const int NPINS = 5;
 const int FAN_IDX = 1;               // which appliance also drives the stepper
+const int TV_IDX = 2;                // which appliance also drives the OLED
 const uint8_t LCD_ADDR = 0x27;
 const unsigned long TIMEOUT_MS = 10000;
 
@@ -39,9 +40,14 @@ const uint8_t STEP_SEQ[8]  = {0x1, 0x3, 0x2, 0x6, 0x4, 0xC, 0x8, 0x9};
 const unsigned long STEP_INTERVAL_US = 1100;
 
 LiquidCrystal_I2C lcd(LCD_ADDR, 16, 2);
+// Software I2C: SCL=pin13, SDA=pin12 (separate from LCD on A4/A5)
+U8G2_SH1106_128X64_NONAME_1_SW_I2C oled(U8G2_R0, /*clock=*/13, /*data=*/12);
 
 bool hasLcd = false;
+bool hasOled = false;
 bool fanOn = false;
+bool tvOn = false;
+bool tvChanged = true;               // redraw on first loop
 uint8_t stepIdx = 0;
 unsigned long lastStepUs = 0;
 char buf[40];
@@ -86,6 +92,10 @@ void handleLine() {
       int v = atoi(p);
       digitalWrite(PINS[i], v ? HIGH : LOW);
       if (i == FAN_IDX) fanOn = v;   // the fan value also runs the stepper
+      if (i == TV_IDX) {
+        bool now = v;
+        if (now != tvOn) { tvOn = now; tvChanged = true; }
+      }
       char* c = strchr(p, ',');
       p = c ? c + 1 : 0;
     }
@@ -107,6 +117,9 @@ void setup() {
     row(0, "Smart Power FYP");
     row(1, "waiting for Mac");
   }
+  // OLED on software I2C (pins 12/13), begin() always succeeds
+  oled.begin();
+  hasOled = true;
   lastText = millis();
 }
 
@@ -121,6 +134,22 @@ void loop() {
     }
   }
   runFan();                          // non-blocking: steps only when due
+
+  // OLED TV screen: redraw only when the tv state changes
+  if (hasOled && tvChanged) {
+    tvChanged = false;
+    oled.firstPage();
+    do {
+      if (tvOn) {
+        oled.setFont(u8g2_font_ncenB14_tr);
+        oled.drawStr(30, 30, "AWAERO");
+        oled.setFont(u8g2_font_6x10_tr);
+        oled.drawStr(40, 50, "TV is ON");
+      }
+      // tv off: draw nothing (blank screen)
+    } while (oled.nextPage());
+  }
+
   if (hasLcd && !stale && millis() - lastText > TIMEOUT_MS) {
     row(0, "NO SIGNAL");
     row(1, "Mac not sending");
