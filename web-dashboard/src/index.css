@@ -4,16 +4,17 @@
   /* shadcn-style hybrid (DESIGN.md): monochrome chrome, semantic colours kept.
      Token names like --navy / --slate are preserved so every component that
      already references them re-skins automatically. */
-  --bg: #f5f5f5; /* canvas */
+  --bg: #f6f7f8; /* canvas (reference IMG_0446: clean, faintly cool) */
   --card: #ffffff; /* paper */
   --surface-alt: #fafafa; /* sidebar, subtle fills */
   --navy: #0a0a0a; /* ink: headings and primary text */
   --ink-soft: #171717; /* strong secondary text */
   --slate: #737373; /* mid-gray: muted text, labels */
   --subtle: #a3a3a3;
-  --hairline: #e5e5e5; /* borders, card edges */
+  --hairline: #e8e8ec; /* borders, card edges (light hairline, no shadow) */
   --primary: #0a0a0a; /* dark filled buttons / active nav */
   --ember: #e7000b; /* destructive only */
+  --red: #e46a46; /* status red: not running, miss (reference coral) */
   --radius: 24px; /* cards */
   --radius-ui: 18px; /* buttons, badges, inputs */
   --shadow:
@@ -28,13 +29,13 @@
      four FYP profile accents so T/A/B/C stay distinguishable. */
   --green: #15803d;
   --green-soft: #e8f3ec;
-  /* Pastel profile colours for every bar, chart and profile fill: each is a 45%
-     tint of its original (A #15803d, T #3b82f6, B #f59e0b, C #94a3b8), so the hues
-     stay recognisable. Text that sits on these uses ink, not white. --green stays
-     strong because it is also used as text/status colour. */
-  --a: #7eb994;
+  /* Profile colours for every bar, chart and profile fill. Green (A) and yellow
+     (B) follow the reference IMG_0446 (owner preference); blue (T) and slate (C)
+     stay as the earlier pastels. Text that sits on these uses ink, not white.
+     --green stays a strong forest green because it is also text/status colour. */
+  --a: #8fc63f;
   --t: #93bafa;
-  --b: #faca79;
+  --b: #efcf5c;
   --c: #c4ccd8;
 }
 
@@ -71,11 +72,14 @@ h3 {
 }
 
 /* Card: borderless, soft elevation (owner preference over DESIGN.md's hairline). */
+/* Clean card: a light hairline, no shadow (reference IMG_0446). Floating
+   surfaces that need lift (the Explain modal, the capture banner) set their own
+   box-shadow inline, which overrides this. */
 .card {
   background: var(--card);
   border-radius: var(--radius);
-  border: none;
-  box-shadow: var(--shadow);
+  border: 1px solid var(--hairline);
+  box-shadow: none;
   padding: 20px;
   /* Strip native button chrome so a <button class="card"> matches a <div>. */
   appearance: none;

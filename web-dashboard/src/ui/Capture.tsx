@@ -158,7 +158,7 @@ export default function Capture() {
 
       {flash && (
         <div className="card" style={{ padding: "12px 16px", fontWeight: 600,
-          color: flash.ok ? "var(--green)" : "#c0392b" }}>
+          color: flash.ok ? "var(--green)" : "var(--red)" }}>
           {flash.ok ? "✓ " : "✗ "}{flash.text}
         </div>
       )}
@@ -196,7 +196,7 @@ export default function Capture() {
                           aria-label="delete frame"
                           style={{
                             position: "absolute", top: -6, right: -6, width: 22, height: 22,
-                            borderRadius: "50%", border: "none", background: "#c0392b",
+                            borderRadius: "50%", border: "none", background: "var(--red)",
                             color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
                             lineHeight: 1, boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
                           }}

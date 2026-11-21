@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { SystemState } from "../lib/types";
+import AnimatedNumber from "./AnimatedNumber";
 
 // Trials: the RO3 live-accuracy recorder. You declare the GROUND TRUTH (what the
 // system SHOULD read right now); the server snapshots its own live decision and
@@ -143,7 +144,9 @@ export default function Trials({ state, delay, setDelay, pending, onArm }: {
         <section className="card">
           {report?.overall ? (
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-              <span style={{ fontSize: 40, fontWeight: 800, color: "var(--green)" }}>{report.overall.pct}%</span>
+              <span style={{ fontSize: 40, fontWeight: 800, color: "var(--green)" }}>
+                <AnimatedNumber value={report.overall.pct} suffix="%" />
+              </span>
               <span className="muted">{report.overall.correct}/{report.overall.n} trials</span>
             </div>
           ) : (
@@ -177,7 +180,7 @@ export default function Trials({ state, delay, setDelay, pending, onArm }: {
                     {LABELS[r.expected] ?? r.expected}
                     <span className="muted" style={{ fontWeight: 400 }}> → {LABELS[r.got] ?? (r.got || "-")}</span>
                   </span>
-                  <span style={{ color: ok ? "var(--green)" : "#c0392b", fontWeight: 700, fontSize: 14 }}>
+                  <span style={{ color: ok ? "var(--green)" : "var(--red)", fontWeight: 700, fontSize: 14 }}>
                     {ok ? "✓" : "✗"}
                   </span>
                 </div>
@@ -219,13 +222,22 @@ function RecordButton({ id, label, sub, accent, count, disabled, onClick }: {
 
 function PathRow({ label, summ }: { label: string; summ?: Summ }) {
   const n = summ?.n ?? 0;
-  const frac = Math.min(1, n / TARGET);
+  const target = Math.min(1, n / TARGET);
+  // Fill from zero on mount (and grow when a trial is added), same as the Stats
+  // bars. rAF defers the target one frame so the empty start paints first.
+  const [frac, setFrac] = useState(0);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setFrac(target));
+    return () => cancelAnimationFrame(id);
+  }, [target]);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
       <span style={{ width: 96, flexShrink: 0 }}>{label}</span>
       <span style={{ flex: 1, height: 8, background: "#eef1f4", borderRadius: 99, overflow: "hidden" }}>
-        <span style={{ display: "block", height: "100%", width: `${frac * 100}%`,
-          background: n >= TARGET ? "var(--a)" : "var(--t)" }} />
+        <span style={{ display: "block", height: "100%", width: "100%",
+          background: n >= TARGET ? "var(--a)" : "var(--t)",
+          transformOrigin: "left", transform: `scaleX(${frac})`,
+          transition: "transform 900ms var(--ease-out)" }} />
       </span>
       <span className="muted" style={{ width: 92, textAlign: "right", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
         {summ ? `${summ.pct}% · ${n}/${TARGET}` : `0/${TARGET}`}

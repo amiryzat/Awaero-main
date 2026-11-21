@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { APPLIANCE_LABELS } from "../lib/types";
 import type { Appliances, Metrics, Profile, Stat } from "../lib/types";
 import type { MetricsWindow } from "../lib/useSystem";
 import RubberSegment from "./RubberSegment";
+import AnimatedNumber from "./AnimatedNumber";
 
 // How long the meters take to fill, and the scrambling numbers to settle.
 const LOAD_MS = 950;
@@ -458,8 +459,12 @@ function DistributionCard({ metrics }: { metrics: Metrics }) {
 // is not a wall of flickering digits.
 function AnimatedBar({ label, pct, suffix, color }: { label: string; pct: number; suffix: string; color: string }) {
   const [frac, setFrac] = useState(0);
+  // Defer the target to the next frame so the scaleX(0) start actually paints
+  // before it animates. Bars that mount from an async fetch (Accuracy by response
+  // path loads /trials after Stats) would otherwise jump straight to full.
   useEffect(() => {
-    setFrac(Math.max(0, Math.min(1, pct / 100)));
+    const id = requestAnimationFrame(() => setFrac(Math.max(0, Math.min(1, pct / 100))));
+    return () => cancelAnimationFrame(id);
   }, [pct]);
   return (
     <div style={{ marginBottom: 12 }}>
@@ -483,45 +488,6 @@ function AnimatedBar({ label, pct, suffix, color }: { label: string; pct: number
         />
       </div>
     </div>
-  );
-}
-
-// Scrambles random numbers on mount for LOAD_MS, then snaps to the exact value
-// (lands as the meter finishes). After settling it tracks real updates without
-// re-scrambling. Reduced motion skips the scramble entirely.
-function AnimatedNumber({ value, suffix = "", decimals = 1 }: { value: number; suffix?: string; decimals?: number }) {
-  const [display, setDisplay] = useState<number>(() => (reduceMotion() ? value : Math.random() * 100));
-  const settled = useRef(reduceMotion());
-  const valueRef = useRef(value);
-  valueRef.current = value;
-
-  useEffect(() => {
-    if (reduceMotion()) {
-      setDisplay(valueRef.current);
-      return;
-    }
-    const start = performance.now();
-    const id = setInterval(() => {
-      if (performance.now() - start >= LOAD_MS) {
-        clearInterval(id);
-        settled.current = true;
-        setDisplay(valueRef.current); // the exact, correct number
-      } else {
-        setDisplay(Math.random() * 100);
-      }
-    }, 55);
-    return () => clearInterval(id);
-  }, []); // mount only: the scramble plays once per tab open
-
-  useEffect(() => {
-    if (settled.current) setDisplay(value); // live refreshes after settle, no re-scramble
-  }, [value]);
-
-  return (
-    <>
-      {display.toFixed(decimals)}
-      {suffix}
-    </>
   );
 }
 

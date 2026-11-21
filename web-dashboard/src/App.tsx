@@ -265,8 +265,8 @@ function CaptureBanner({ pending, flash, state, onCancel }: {
     <div style={wrap}>
       <div className="card" style={{
         padding: "12px 16px", fontWeight: 600,
-        color: flash!.ok ? "var(--green)" : "#c0392b",
-        borderLeft: `6px solid ${flash!.ok ? "var(--green)" : "#c0392b"}`,
+        color: flash!.ok ? "var(--green)" : "var(--red)",
+        borderLeft: `6px solid ${flash!.ok ? "var(--green)" : "var(--red)"}`,
         boxShadow: "0 6px 24px rgba(0,0,0,0.18)",
       }}>
         <div>
@@ -293,7 +293,7 @@ function ConnLine({ conn, online, stale }: { conn: Conn; online?: boolean; stale
         : online
           ? "Live"
           : `System not running (last update ${stale ?? "?"}s ago)`;
-  const color = live ? "var(--green)" : conn === "down" ? "#c0392b" : "var(--slate)";
+  const color = live ? "var(--green)" : conn === "down" ? "var(--red)" : "var(--slate)";
   const bg = live ? "var(--green-soft)" : conn === "down" ? "#fdecea" : "#eef1f4";
   return (
     <div
