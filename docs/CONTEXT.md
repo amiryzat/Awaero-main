@@ -19,7 +19,16 @@ the open questions. Evidence for every number is in `EVAL_passive_vlm.md`.
   - Active: hand gestures -> open palm = TV, peace = lights, point = desk lamp,
     rock = AC, fist = all-off.
 
-## Current state (2026-11-21)
+## Current state (2026-11-22)
+- **The full camera->VLM->LED 5-appliance live run is DONE and validated**
+  (2026-11-22). The revised policy, sticky gesture toggle overrides, and AC/fan
+  exclusive cooling have now run end to end through the camera pipeline, not just
+  driven directly. Exclusive cooling keeps the fan-off INSTANT (a delay was
+  considered and rejected: AC cools in minutes, so a few-second delay gives no real
+  overlap and breaks the never-together invariant). Gesture toggle double-fire is a
+  documented Q&A limitation, not a bug.
+- **Physical model-house build materials have arrived** - the cardboard house is
+  ready to build (LEDs become labelled appliances; all 5V/USB, never mains).
 - **app-monitor** (phone app) works over the USB cable through PRD Phase 4;
   auto-discovery rewritten and installed on the iPhone 17. **Wireless
   phone-to-Mac is a dead end on the borrowed WiFi** (two APs share one
@@ -112,10 +121,11 @@ evaluated alternative in Chapter 4.
 - RO3 still open: end-to-end camera->LED response time per transition, and the
   final Simulated Appliance Activation Reduction figure. (Mandated term; "energy saving performance" and
   "Simulated Energy Reduction" are banned.)
-- **One full camera->VLM->LED live run with the 5 appliances** - the revised
-  policy has only been driven directly, never through the camera pipeline yet.
+- ~~One full camera->VLM->LED live run with the 5 appliances~~ **DONE 2026-11-22**
+  (validated end to end; see Current state).
 - Fast DC motor swap for the physical fan; optional DHT11 for real AC temperature.
-- Physical model house; optional presence status LED.
+- **Physical model house: materials arrived, ready to build**; optional presence
+  status LED.
 - Chapters 4 and 5.
 
 ## How the user likes to work

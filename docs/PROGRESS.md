@@ -1,6 +1,6 @@
 # FYP Progress - Vision-Based Smart Power Management
 
-Last updated: 2026-11-21
+Last updated: 2026-11-22
 
 ## Status: working end to end, live-tested on the iPhone 12 + Arduino
 
@@ -113,6 +113,13 @@ keeps whatever the appliance is doing). AC is an ASSUMED policy (no temp sensor)
 - **Darkness**: low-light rescue helps dim rooms, not black ones (IR camera is
   the production answer).
 - **Qwen latency**: ~15 s per answer live; posture changes wait for it.
+- **Gesture is a toggle, easy to double-fire.** Each gesture flips its appliance
+  against the current state (`override[i] = 0 if appl[i] else 1`), so one gesture
+  does both on and off. Lowering and re-raising the hand re-arms it, so a palm
+  raised twice turns the TV on then off (seen 2026-11-21: open_palm at 15:10:06/
+  :15/:22/:33 cycled TV on/off/on/off, one ACTIVE_ENTER per raise). By design, not
+  a bug; same operator-timing class as the T-lag. Mitigation: raise once, hold
+  briefly, lower.
 
 ## Run
 ```bash
@@ -141,6 +148,17 @@ library 1.4.7, Adafruit Unified Sensor.
   ("Amvx") excluded.
 
 ## Session log
+- **2026-11-22**: First full camera->VLM->LED live run with all 5 appliances
+  (previously the policy was only driven directly). Launched tracked (Moondream),
+  dashboard + launchd server up, analysed from `live_log.csv` on exit. Validated:
+  (1) **exclusive cooling** - `rock` -> AC on, fan forced off instantly;
+  **decided to keep fan-off instant, not delayed** (a real AC cools in minutes, a
+  few-second delay buys no overlap and would break the never-together invariant);
+  (2) **sticky gesture toggle** - each gesture flips its appliance; open_palm
+  cycled TV on/off/on/off over four raises; **decided to keep the toggle, double-
+  fire documented** as a Q&A limitation; (3) **policy** - A lamp on/TV off, T held,
+  B correct. **Physical model-house build materials arrived** (last blocked physical
+  task). Re-bootstrapped the launchd server (plist present but not loaded at start).
 - **2026-11-21**: OLED TV display wired and tested. 0.96" SH1106 OLED on software
   I2C (pins 12/13) represents the TV: shows content when TV=1, blank when TV=0.
   Sharing hardware I2C (A4/A5) caused library conflicts (U8g2 vs LiquidCrystal_I2C);
@@ -226,9 +244,12 @@ library 1.4.7, Adafruit Unified Sensor.
 - **2026-11-10**: Arduino LED actuation built and wired (`HANDOFF.md`).
 
 ## Next
-- **One full camera->VLM->LED live run with the 5 appliances** - the revised policy
-  has only been driven directly, not yet through the camera pipeline. Launch
-  `live_system.py` TRACKED so the whole run can be analysed.
+- **DONE (2026-11-22): the full camera->VLM->LED live run with 5 appliances.**
+  Exclusive cooling, sticky gesture toggle and the revised policy all validated
+  through the camera pipeline (see the session log). Nothing left to drive-test.
+- **Build the cardboard model house** - materials have arrived. Mount the 5 LEDs
+  as labelled appliances on extended jumper wires, LCD + OLED visible; all 5V/USB.
+- Wire the DHT22 (pin 6) for temperature-based AC.
 - Fast DC motor swap for the physical fan (DC motor + fan blade + IRF520 module).
 - The three live-run fixes are DONE + validated. RO3 postures AND gestures now have
   >=10 trials each (A 11, T 12, B 10, C 10, open_palm 12, peace 12, fist 10).

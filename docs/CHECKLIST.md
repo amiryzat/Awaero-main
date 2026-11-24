@@ -1,7 +1,7 @@
 # FYP Checklist
 
 Vision-Based Smart Power Management. What is built vs what is not.
-Last updated: 2026-11-17. Newest live-state pointer: `docs/RESUME.md`.
+Last updated: 2026-11-22. Newest live-state pointer: `docs/RESUME.md`.
 
 ### Activity-based redesign (Phase 1, 2026-11-17) - the VLM A/B
 - [x] `scene_activity.py` - description -> activity (STUDYING/RESTING/
@@ -15,6 +15,11 @@ Last updated: 2026-11-17. Newest live-state pointer: `docs/RESUME.md`.
       live label; desk lamp on only when at the desk (at_desk scene cue)
 - [x] Gestures (2026-11-19): point = desk lamp, rock = AC. AC/fan mutual
       exclusion (AC on -> fan off); AC no longer auto-on
+- [x] **Full camera->VLM->LED live run with all 5 appliances (2026-11-22)** -
+      first run through the real pipeline, not driven directly. Validated:
+      exclusive cooling (rock -> AC on, fan forced off instantly; fan-off kept
+      instant, delay rejected), sticky gesture toggle (double-fire documented as a
+      Q&A limitation), revised policy (A lamp on/TV off, T held, B correct)
 - [ ] DHT22 temperature sensor -> AC on >27C (ordered)
 - [ ] Tag trials by engine; two live runs (Moondream, Qwen) for live latency/accuracy
 
@@ -176,7 +181,8 @@ Last updated: 2026-11-17. Newest live-state pointer: `docs/RESUME.md`.
 
 ### Demo build
 - [ ] Physical cardboard model house with the LEDs as labelled appliances
-- [ ] LEDs extended off the breadboard on jumper wires (m-f, on order)
+      (**materials arrived 2026-11-22, ready to build**)
+- [ ] LEDs extended off the breadboard on jumper wires (m-f)
 - [ ] Wireless phone<->Mac for the viva: bring ONE network we control (hotspot or
       pocket router). The borrowed WiFi isolates clients (two APs share one SSID)
       so the phone cannot reach the Mac on it; the USB cable works meanwhile. Not

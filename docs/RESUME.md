@@ -2,9 +2,19 @@
 
 Newest-state pointer for a new chat. Read this first, then `CHECKLIST.md`
 (what is built vs not), `CONTEXT.md` (decisions), `PROGRESS.md` (build state).
-Last updated: 2026-11-21.
+Last updated: 2026-11-22.
 
 ## One-line status
+**First full camera->VLM->LED 5-appliance live run DONE and validated.** The
+revised policy, sticky gesture overrides and AC/fan exclusive cooling have now
+run end to end through the camera pipeline (previously only driven directly).
+Exclusive cooling confirmed (rock -> AC on, fan forced off instantly); gesture
+toggle confirmed; policy confirmed (A lamp on/TV off, T held, B correct).
+**Physical model-house build materials have arrived** - the cardboard house is
+now ready to build (LEDs become the labelled appliances). Next hardware:
+DHT22 (pin 6) + DC motor/IRF520 (pin 3), then the house build, then writing.
+
+## One-line status (previous)
 **OLED TV display WORKING.** A 0.96" SH1106 OLED on software I2C (pins 12/13)
 represents the TV appliance: shows "AWAERO / TV is ON" when TV=1, goes blank
 when TV=0. The LCD stays on hardware I2C (A4/A5) as the status display. Both
@@ -16,6 +26,32 @@ the LCD. RAM: 1030 bytes free (tight but stable).
 is now `/dev/cu.usbmodem1101` (changed USB port). Sticky gesture overrides +
 AC/fan mutual exclusion are coded but NOT yet validated live (room was crowded).
 Next: wire DHT22 sensor, DC motor, then do the full live test.
+
+## What happened 2026-11-22: first full 5-appliance live run + house materials
+- **The full camera->VLM->LED pipeline ran end to end with all 5 appliances** -
+  the thing that had never been tested, only driven directly. Launched tracked
+  (`live_system.py`, Moondream); dashboard served by the launchd server; validated
+  from `live_log.csv` on exit.
+- **Exclusive cooling validated live**: `rock` gesture turned the AC on and
+  `exclusive_cooling()` forced the fan off instantly (15:29:36 and 15:16:06).
+  **Decision: keep the fan-off INSTANT, not delayed.** A fan-off delay was
+  considered and rejected - a real AC cools in minutes not seconds, so a few-second
+  delay buys no real overlap and would break the selftested "AC and fan never run
+  together" invariant for nothing.
+- **Sticky gesture overrides validated**: each gesture TOGGLES its appliance
+  against the current state. open_palm cycled the TV on/off/on/off across four
+  separate raises (15:10:06/:15/:22/:33, one ACTIVE_ENTER each). Working as coded.
+  **Decision: keep the toggle, document the double-fire** as a Q&A limitation
+  (done, in `PROGRESS.md`). Not a bug - same operator-timing class as the T-lag.
+- **Policy validated through the camera**: A committed with lamp ON + TV OFF, T
+  held TV/AC, B dropped correctly. The lamp-off reading flagged mid-run was a
+  transitional frame, not a fault.
+- **Physical model-house build materials ARRIVED.** The cardboard model house
+  (LEDs become labelled appliances on extended jumper wires, all 5V/USB) is now
+  ready to build. This was the last blocked physical task.
+- Launchd server was not loaded at session start (plist present, service not
+  bootstrapped); re-bootstrapped with `launchctl bootstrap gui/$(id -u)
+  ~/Library/LaunchAgents/com.amiryzat.awaero.server.plist`. Back up on 8000.
 
 ## What happened 2026-11-21: OLED TV display wired and tested
 - Wired a 0.96" SH1106 OLED as the TV screen representation. When TV appliance
@@ -232,9 +268,13 @@ The dashboard got a full UI pass. No FYP Python changed in this session, only
   when no VLM answer. FUSED_APP is authoritative.
 
 ## NEXT STEP
-**First: one full camera->VLM->LED live run with the 5 appliances** - the new policy
-has only been driven directly, never through the camera pipeline yet. Then the fast
-DC motor swap when it arrives. After that it is WRITING, not code:
+**Done: the full camera->VLM->LED 5-appliance live run** (2026-11-22, validated
+above). Next, now that materials have arrived:
+1. **Build the cardboard model house** - mount the 5 LEDs as labelled appliances
+   on the extended jumper wires, the LCD + OLED visible. All 5V/USB, never mains.
+2. **Wire the DHT22** (pin 6) for temperature-based AC.
+3. **Wire the DC motor + IRF520 MOSFET** (pin 3, PWM) to replace the parked stepper.
+After that it is WRITING, not code:
 - Chapter 4: the before/after (94.5% -> A&B 100%, 98% settled) + the T-lag tradeoff.
 - The per-transition camera->LED wall-clock latency table (per-trial `vlm_latency_s`
   + decide/actuate are logged; still need the transition table).
